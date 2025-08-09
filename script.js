@@ -4,6 +4,7 @@ class WritingApp {
         this.textContainer = document.getElementById('textContainer');
         this.targetWords = 24;
         this.currentText = '';
+        this.isRTL = false; // Add this line
         this.init();
     }
 
@@ -38,11 +39,16 @@ class WritingApp {
         e.preventDefault();
     }
 
+
     updateDisplay() {
         // Break text into lines with exact character count
         const formattedText = this.formatTextIntoLines(this.currentText);
         this.textContainer.textContent = formattedText;
         this.textContainer.style.fontSize = `${this.fontSize}px`;
+        
+        // Detect Hebrew and apply RTL if needed
+        this.detectRTL();
+        
         this.positionCursor();
     }
     
@@ -136,18 +142,39 @@ class WritingApp {
         document.body.appendChild(tempChar);
         
         const actualCharWidth = tempChar.offsetWidth;
-        const actualCharHeight = tempChar.offsetHeight; // Use actual character height, not lineHeight
+        const actualCharHeight = tempChar.offsetHeight;
         
         document.body.removeChild(tempChar);
         
         // Calculate pixel position relative to container
         const containerRect = this.textContainer.getBoundingClientRect();
-        const x = containerRect.left + (columnNumber * actualCharWidth);
-        const y = containerRect.top + (lineNumber * actualCharHeight); // Use character height instead of lineHeight
+        
+        let x, y;
+        
+        if (this.isRTL) {
+            // For RTL: cursor position from right edge
+            x = containerRect.right - (columnNumber) * actualCharWidth;
+        } else {
+            // For LTR: cursor position from left edge
+            x = containerRect.left + (columnNumber * actualCharWidth);
+        }
+        
+        y = containerRect.top + (lineNumber * actualCharHeight);
         
         this.cursor.style.left = `${x}px`;
         this.cursor.style.top = `${y}px`;
-        this.cursor.style.height = `${actualCharHeight}px`; // Match character height exactly
+        this.cursor.style.height = `${actualCharHeight}px`;
+    }
+
+    detectRTL() {
+        // Hebrew Unicode range: U+0590 to U+05FF
+        const hebrewRegex = /[\u0590-\u05FF]/;
+        const hasHebrew = hebrewRegex.test(this.currentText);
+        
+        if (hasHebrew !== this.isRTL) {
+            this.isRTL = hasHebrew;
+            this.textContainer.classList.toggle('rtl', this.isRTL);
+        }
     }
 }
 

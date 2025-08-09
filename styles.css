@@ -38,3 +38,8 @@ html, body {
     background: transparent;
     overflow: hidden;
 }
+.text-container.rtl {
+    direction: rtl;
+    text-align: right;
+    unicode-bidi: bidi-override;
+}
