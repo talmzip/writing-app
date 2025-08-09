@@ -1,382 +1,156 @@
-/**
- * Minimalist Writing App
- * A clean, responsive writing interface with dynamic font scaling and smooth rendering
- */
-
 class WritingApp {
     constructor() {
-        this.textArea = document.getElementById('textArea');
-        this.cursor = document.getElementById('cursor');
-        
-        // Configuration
-        this.MIN_WORDS_ON_SCREEN = 20;
-        this.MAX_WORDS_ON_SCREEN = 110;
-        this.INITIAL_FONT_SIZE = 32;
-        this.MIN_FONT_SIZE = 8;
-        
-        // State
+        this.cursor = document.querySelector('.cursor');
+        this.textContainer = document.getElementById('textContainer');
+        this.targetWords = 24;
         this.currentText = '';
-        this.cursorPosition = 0;
-        this.currentFontSize = this.INITIAL_FONT_SIZE;
-        this.isRTL = false;
-        this.charsPerLine = 0;
-        this.maxLines = 0;
-        
-        // Bind methods
-        this.handleInput = this.handleInput.bind(this);
-        this.handleKeyDown = this.handleKeyDown.bind(this);
-        this.handlePaste = this.handlePaste.bind(this);
-        this.updateDisplay = this.updateDisplay.bind(this);
-        this.updateCursor = this.updateCursor.bind(this);
-        
         this.init();
     }
-    
+
     init() {
-        // Set initial font size
-        this.textArea.style.fontSize = `${this.currentFontSize}px`;
+        this.calculateFontSize();
+        this.positionElements();
+        this.setupEventListeners();
         
-        // Calculate initial layout
-        this.calculateLayout();
-        
-        // Event listeners
-        this.textArea.addEventListener('input', this.handleInput);
-        this.textArea.addEventListener('keydown', this.handleKeyDown);
-        this.textArea.addEventListener('paste', this.handlePaste);
-        window.addEventListener('resize', () => this.calculateLayout());
-        
-        // Focus the text area and position cursor
-        this.textArea.focus();
-        this.updateCursor();
-        
-        // Prevent default text selection behavior
-        this.textArea.addEventListener('selectstart', (e) => e.preventDefault());
+        // Make the page focusable for keyboard input
+        document.body.tabIndex = 0;
+        document.body.focus();
+    }
+
+    setupEventListeners() {
+        document.addEventListener('keydown', (e) => this.handleKeypress(e));
+        window.addEventListener('resize', () => {
+            this.calculateFontSize();
+            this.positionElements();
+        });
+    }
+
+    handleKeypress(e) {
+        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // Regular character input
+            this.currentText += e.key;
+            this.updateDisplay();
+        } else if (e.key === 'Backspace') {
+            // Backspace
+            this.currentText = this.currentText.slice(0, -1);
+            this.updateDisplay();
+        }
+        e.preventDefault();
+    }
+
+    updateDisplay() {
+        // Break text into lines with exact character count
+        const formattedText = this.formatTextIntoLines(this.currentText);
+        this.textContainer.textContent = formattedText;
+        this.textContainer.style.fontSize = `${this.fontSize}px`;
+        this.positionCursor();
     }
     
-    /**
-     * Calculate characters per line and maximum lines based on current font size
-     */
-    calculateLayout() {
-        const containerWidth = this.textArea.clientWidth;
-        const containerHeight = this.textArea.clientHeight;
+    formatTextIntoLines(text) {
+        if (!text) return '';
         
-        // Create temporary element to measure character dimensions
-        const tempElement = document.createElement('div');
-        tempElement.style.cssText = `
+        const lines = [];
+        for (let i = 0; i < text.length; i += this.charsPerLine) {
+            lines.push(text.slice(i, i + this.charsPerLine));
+        }
+        return lines.join('\n');
+    }
+
+    calculateFontSize() {
+        const viewportWidth = window.innerWidth * 0.9;
+        const viewportHeight = window.innerHeight * 0.9;
+        const totalChars = 100; // Total characters that should fit on entire screen
+        
+        let bestFontSize = 4;
+        let bestCharWidth = 0;
+        let bestLineHeight = 0;
+        let bestCharsPerLine = 0;
+        
+        // Try different font sizes to find the one that fits exactly 100 characters on screen
+        for (let fontSize = 4; fontSize <= 200; fontSize += 1) {
+            const tempChar = document.createElement('div');
+            tempChar.style.cssText = `
+                position: absolute;
+                visibility: hidden;
+                font-family: 'Courier New', monospace;
+                font-size: ${fontSize}px;
+                white-space: pre;
+            `;
+            tempChar.textContent = 'M';
+            document.body.appendChild(tempChar);
+            
+            const charWidth = tempChar.offsetWidth;
+            const lineHeight = tempChar.offsetHeight * 1.2;
+            
+            document.body.removeChild(tempChar);
+            
+            // Calculate how many characters fit horizontally and vertically
+            const charsPerLine = Math.floor(viewportWidth / charWidth);
+            const linesOnScreen = Math.floor(viewportHeight / lineHeight);
+            const totalCharsOnScreen = charsPerLine * linesOnScreen;
+            
+            // Find the largest font where exactly 100 chars (or close) fit on screen
+            if (totalCharsOnScreen >= totalChars) {
+                bestFontSize = fontSize;
+                bestCharWidth = charWidth;
+                bestLineHeight = lineHeight;
+                bestCharsPerLine = charsPerLine;
+            } else {
+                // Stop when we can't fit 100 characters anymore
+                break;
+            }
+        }
+        
+        this.fontSize = bestFontSize;
+        this.lineHeight = bestLineHeight;
+        this.charWidth = bestCharWidth;
+        this.charsPerLine = bestCharsPerLine;
+        this.maxLines = Math.floor(viewportHeight / bestLineHeight);
+        
+        const totalCapacity = this.charsPerLine * this.maxLines;
+        console.log(`Font: ${this.fontSize}px | ${this.charsPerLine} chars/line | ${this.maxLines} lines | Total capacity: ${totalCapacity} chars`);
+    }
+
+    positionElements() {
+        this.positionCursor();
+    }
+
+    positionCursor() {
+        if (!this.charsPerLine) return;
+        
+        // Calculate which line and column the cursor is on
+        const cursorPosition = this.currentText.length;
+        const lineNumber = Math.floor(cursorPosition / this.charsPerLine);
+        const columnNumber = cursorPosition % this.charsPerLine;
+        
+        // Get the actual character dimensions
+        const tempChar = document.createElement('div');
+        tempChar.style.cssText = `
             position: absolute;
             visibility: hidden;
-            font-family: ${getComputedStyle(this.textArea).fontFamily};
-            font-size: ${this.currentFontSize}px;
-            line-height: ${getComputedStyle(this.textArea).lineHeight};
+            font-family: 'Courier New', monospace;
+            font-size: ${this.fontSize}px;
             white-space: pre;
         `;
-        tempElement.textContent = 'M'; // Use 'M' as it's typically the widest character
-        document.body.appendChild(tempElement);
+        tempChar.textContent = 'M';
+        document.body.appendChild(tempChar);
         
-        const charWidth = tempElement.offsetWidth;
-        const lineHeight = tempElement.offsetHeight;
+        const actualCharWidth = tempChar.offsetWidth;
+        const actualCharHeight = tempChar.offsetHeight; // Use actual character height, not lineHeight
         
-        document.body.removeChild(tempElement);
+        document.body.removeChild(tempChar);
         
-        // Calculate layout
-        this.charsPerLine = Math.floor(containerWidth / charWidth);
-        this.maxLines = Math.floor(containerHeight / lineHeight);
-        
-        // Ensure minimum values
-        this.charsPerLine = Math.max(this.charsPerLine, 10);
-        this.maxLines = Math.max(this.maxLines, 3);
-    }
-    
-    /**
-     * Handle text input and update display
-     */
-    handleInput(event) {
-        event.preventDefault();
-        
-        // Get the actual content
-        const newText = this.textArea.textContent || '';
-        this.currentText = newText;
-        this.cursorPosition = this.getCaretPosition();
-        
-        // Check for RTL text (Hebrew detection)
-        this.detectRTL();
-        
-        // Update font size based on word count
-        this.updateFontSize();
-        
-        // Format and display text
-        this.updateDisplay();
-        
-        // Update cursor position
-        this.updateCursor();
-    }
-    
-    /**
-     * Handle special key presses
-     */
-    handleKeyDown(event) {
-        switch (event.key) {
-            case 'Backspace':
-                event.preventDefault();
-                this.handleBackspace();
-                break;
-            case 'Delete':
-                event.preventDefault();
-                this.handleDelete();
-                break;
-            case 'ArrowLeft':
-                event.preventDefault();
-                this.moveCursor(-1);
-                break;
-            case 'ArrowRight':
-                event.preventDefault();
-                this.moveCursor(1);
-                break;
-            case 'ArrowUp':
-                event.preventDefault();
-                this.moveCursor(-this.charsPerLine);
-                break;
-            case 'ArrowDown':
-                event.preventDefault();
-                this.moveCursor(this.charsPerLine);
-                break;
-            case 'Home':
-                event.preventDefault();
-                this.moveCursorToLineStart();
-                break;
-            case 'End':
-                event.preventDefault();
-                this.moveCursorToLineEnd();
-                break;
-            default:
-                if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
-                    event.preventDefault();
-                    this.insertCharacter(event.key);
-                }
-                break;
-        }
-    }
-    
-    /**
-     * Handle paste events
-     */
-    handlePaste(event) {
-        event.preventDefault();
-        const pastedText = (event.clipboardData || window.clipboardData).getData('text');
-        this.insertText(pastedText);
-    }
-    
-    /**
-     * Insert a single character at cursor position
-     */
-    insertCharacter(char) {
-        this.currentText = this.currentText.slice(0, this.cursorPosition) + 
-                          char + 
-                          this.currentText.slice(this.cursorPosition);
-        this.cursorPosition++;
-        
-        this.detectRTL();
-        this.updateFontSize();
-        this.updateDisplay();
-        this.updateCursor();
-    }
-    
-    /**
-     * Insert text at cursor position
-     */
-    insertText(text) {
-        this.currentText = this.currentText.slice(0, this.cursorPosition) + 
-                          text + 
-                          this.currentText.slice(this.cursorPosition);
-        this.cursorPosition += text.length;
-        
-        this.detectRTL();
-        this.updateFontSize();
-        this.updateDisplay();
-        this.updateCursor();
-    }
-    
-    /**
-     * Handle backspace
-     */
-    handleBackspace() {
-        if (this.cursorPosition > 0) {
-            this.currentText = this.currentText.slice(0, this.cursorPosition - 1) + 
-                              this.currentText.slice(this.cursorPosition);
-            this.cursorPosition--;
-            
-            this.updateFontSize();
-            this.updateDisplay();
-            this.updateCursor();
-        }
-    }
-    
-    /**
-     * Handle delete
-     */
-    handleDelete() {
-        if (this.cursorPosition < this.currentText.length) {
-            this.currentText = this.currentText.slice(0, this.cursorPosition) + 
-                              this.currentText.slice(this.cursorPosition + 1);
-            
-            this.updateDisplay();
-            this.updateCursor();
-        }
-    }
-    
-    /**
-     * Move cursor by offset
-     */
-    moveCursor(offset) {
-        this.cursorPosition = Math.max(0, Math.min(this.currentText.length, this.cursorPosition + offset));
-        this.updateCursor();
-    }
-    
-    /**
-     * Move cursor to start of current line
-     */
-    moveCursorToLineStart() {
-        const currentLine = Math.floor(this.cursorPosition / this.charsPerLine);
-        this.cursorPosition = currentLine * this.charsPerLine;
-        this.updateCursor();
-    }
-    
-    /**
-     * Move cursor to end of current line
-     */
-    moveCursorToLineEnd() {
-        const currentLine = Math.floor(this.cursorPosition / this.charsPerLine);
-        const lineEnd = Math.min((currentLine + 1) * this.charsPerLine - 1, this.currentText.length);
-        this.cursorPosition = lineEnd;
-        this.updateCursor();
-    }
-    
-    /**
-     * Detect if text contains Hebrew characters
-     */
-    detectRTL() {
-        const hebrewRegex = /[\u0590-\u05FF]/;
-        const newIsRTL = hebrewRegex.test(this.currentText);
-        
-        if (newIsRTL !== this.isRTL) {
-            this.isRTL = newIsRTL;
-            this.textArea.classList.toggle('rtl', this.isRTL);
-        }
-    }
-    
-    /**
-     * Update font size based on word count
-     */
-    updateFontSize() {
-        const wordCount = this.countWords();
-        
-        if (wordCount <= this.MIN_WORDS_ON_SCREEN) {
-            this.currentFontSize = this.INITIAL_FONT_SIZE;
-        } else if (wordCount >= this.MAX_WORDS_ON_SCREEN) {
-            this.currentFontSize = this.MIN_FONT_SIZE;
-        } else {
-            // Linear interpolation between min and max
-            const ratio = (wordCount - this.MIN_WORDS_ON_SCREEN) / (this.MAX_WORDS_ON_SCREEN - this.MIN_WORDS_ON_SCREEN);
-            this.currentFontSize = this.INITIAL_FONT_SIZE - (this.INITIAL_FONT_SIZE - this.MIN_FONT_SIZE) * ratio;
-        }
-        
-        this.textArea.style.fontSize = `${this.currentFontSize}px`;
-        this.calculateLayout();
-    }
-    
-    /**
-     * Count words in current text
-     */
-    countWords() {
-        if (!this.currentText.trim()) return 0;
-        return this.currentText.trim().split(/\s+/).length;
-    }
-    
-    /**
-     * Format text into fixed-width lines and update display
-     */
-    updateDisplay() {
-        if (!this.currentText) {
-            this.textArea.textContent = '';
-            return;
-        }
-        
-        // Break text into fixed-width lines (character-based, not word-based)
-        const lines = [];
-        for (let i = 0; i < this.currentText.length; i += this.charsPerLine) {
-            lines.push(this.currentText.slice(i, i + this.charsPerLine));
-        }
-        
-        // Handle scrolling when we reach max words
-        const wordCount = this.countWords();
-        if (wordCount >= this.MAX_WORDS_ON_SCREEN) {
-            this.textArea.classList.add('scrollable');
-            
-            // Auto-scroll to keep current line visible
-            const currentLine = Math.floor(this.cursorPosition / this.charsPerLine);
-            if (currentLine >= this.maxLines) {
-                const scrollToLine = currentLine - this.maxLines + 2;
-                this.textArea.scrollTop = scrollToLine * this.currentFontSize * 1.2;
-            }
-        } else {
-            this.textArea.classList.remove('scrollable');
-            this.textArea.scrollTop = 0;
-        }
-        
-        // Update text content
-        this.textArea.textContent = lines.join('\n');
-    }
-    
-    /**
-     * Update cursor position visually
-     */
-    updateCursor() {
-        if (this.charsPerLine === 0) return;
-        
-        const line = Math.floor(this.cursorPosition / this.charsPerLine);
-        const column = this.cursorPosition % this.charsPerLine;
-        
-        const charWidth = this.currentFontSize * 0.6; // Approximate character width
-        const lineHeight = this.currentFontSize * 1.2;
-        
-        const textAreaRect = this.textArea.getBoundingClientRect();
-        const scrollTop = this.textArea.scrollTop;
-        
-        let x, y;
-        
-        if (this.isRTL) {
-            x = textAreaRect.right - (column + 1) * charWidth - textAreaRect.left;
-        } else {
-            // Center the cursor based on text alignment
-            const textWidth = Math.min(this.currentText.length, this.charsPerLine) * charWidth;
-            const startX = (textAreaRect.width - textWidth) / 2;
-            x = startX + column * charWidth;
-        }
-        
-        y = line * lineHeight - scrollTop;
+        // Calculate pixel position relative to container
+        const containerRect = this.textContainer.getBoundingClientRect();
+        const x = containerRect.left + (columnNumber * actualCharWidth);
+        const y = containerRect.top + (lineNumber * actualCharHeight); // Use character height instead of lineHeight
         
         this.cursor.style.left = `${x}px`;
         this.cursor.style.top = `${y}px`;
-        this.cursor.style.height = `${lineHeight}px`;
-    }
-    
-    /**
-     * Get current caret position (fallback for contenteditable)
-     */
-    getCaretPosition() {
-        const selection = window.getSelection();
-        if (selection.rangeCount === 0) return this.cursorPosition;
-        
-        const range = selection.getRangeAt(0);
-        const preCaretRange = range.cloneRange();
-        preCaretRange.selectNodeContents(this.textArea);
-        preCaretRange.setEnd(range.endContainer, range.endOffset);
-        
-        return preCaretRange.toString().length;
+        this.cursor.style.height = `${actualCharHeight}px`; // Match character height exactly
     }
 }
 
-// Initialize the app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     new WritingApp();
 });
