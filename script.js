@@ -9,10 +9,12 @@ class WritingApp {
     }
 
     init() {
+        this.statusMessage = document.getElementById('statusMessage');
         this.calculateFontSize();
         this.positionElements();
         this.setupEventListeners();
-        
+        this.loadSessionFromURL();
+
         // Make the page focusable for keyboard input
         document.body.tabIndex = 0;
         document.body.focus();
@@ -27,7 +29,10 @@ class WritingApp {
     }
 
     handleKeypress(e) {
-        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            // Ctrl+S / Cmd+S: save session as sharable URL
+            this.saveSession();
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
             // Regular character input
             this.currentText += e.key;
             this.updateDisplay();
@@ -37,6 +42,47 @@ class WritingApp {
             this.updateDisplay();
         }
         e.preventDefault();
+    }
+
+    saveSession() {
+        if (!this.currentText) {
+            this.showStatus('nothing to save');
+            return;
+        }
+        const encoded = btoa(unescape(encodeURIComponent(this.currentText)));
+        const url = `${location.origin}${location.pathname}#session=${encoded}`;
+        navigator.clipboard.writeText(url).then(() => {
+            this.showStatus('session URL copied — open it on any device');
+        }).catch(() => {
+            // Fallback: update the URL bar so the user can copy manually
+            history.replaceState(null, '', `#session=${encoded}`);
+            this.showStatus('session saved to URL — copy from address bar');
+        });
+    }
+
+    loadSessionFromURL() {
+        const hash = location.hash;
+        const match = hash.match(/^#session=(.+)$/);
+        if (!match) return;
+        try {
+            const text = decodeURIComponent(escape(atob(match[1])));
+            this.currentText = text;
+            this.updateDisplay();
+            // Clean the hash from the URL so refreshing doesn't re-load
+            history.replaceState(null, '', location.pathname);
+            this.showStatus('session restored');
+        } catch (e) {
+            this.showStatus('could not restore session');
+        }
+    }
+
+    showStatus(message) {
+        this.statusMessage.textContent = message;
+        this.statusMessage.classList.add('visible');
+        clearTimeout(this._statusTimer);
+        this._statusTimer = setTimeout(() => {
+            this.statusMessage.classList.remove('visible');
+        }, 2500);
     }
 
 

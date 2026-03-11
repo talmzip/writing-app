@@ -38,6 +38,26 @@ html, body {
     background: transparent;
     overflow: hidden;
 }
+.status-message {
+    position: fixed;
+    bottom: 2%;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: black;
+    background: white;
+    border: 1px solid black;
+    padding: 6px 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.status-message.visible {
+    opacity: 1;
+}
+
 .text-container.rtl {
     direction: rtl;
     text-align: right;
