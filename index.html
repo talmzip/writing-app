@@ -2,13 +2,44 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minimalist Writing App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Writing</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="cursor"></div>
-    <div id="textContainer" class="text-container"></div>
+    <!-- Writing screen -->
+    <div id="writing-screen">
+        <div id="viewport">
+            <div id="fade-overlay"></div>
+            <div id="text-world">
+                <div id="text-display"></div>
+                <div id="cursor"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Past sessions screen -->
+    <div id="sessions-screen" class="hidden">
+        <div class="sessions-header">
+            <button id="back-to-write" class="sessions-btn">&#8592; Write</button>
+            <h2>Past Sessions</h2>
+        </div>
+        <div id="sessions-list"></div>
+        <div id="session-detail" class="hidden">
+            <div class="session-detail-header">
+                <button id="back-to-list" class="sessions-btn">&#8592; Back</button>
+                <span id="session-detail-date"></span>
+                <button id="delete-session" class="sessions-btn delete-btn">Delete</button>
+            </div>
+            <div id="session-detail-text"></div>
+        </div>
+    </div>
+
+    <!-- Tiny corner button to access past sessions from writing screen -->
+    <button id="sessions-toggle" title="Past sessions">&#9776;</button>
+
+    <textarea id="hidden-input" inputmode="text" autocapitalize="sentences" autocomplete="off" spellcheck="false"></textarea>
     <script src="script.js"></script>
 </body>
 </html>
