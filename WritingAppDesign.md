@@ -70,7 +70,9 @@ Future ideas include analytics and insights built on top of saved sessions.
 ### Implementation Architecture
 - **Input:** Hidden `<textarea>` captures all input (works on mobile + desktop). `input` event for text, `keydown` for Enter handling.
 - **Rendering:** Text rendered into `#text-display` with `white-space: pre-wrap` and `word-break: break-all`. Words split mid-word to maintain a solid rectangle text block.
-- **Zoom:** Continuous. CSS `transform: scale(S)` on `#text-world` container. Text always rendered at `BASE_FONT_SIZE` (48px). Scale interpolated between start/end values based on character count with ease-out curve. No transition animation — scale updates instantly every keystroke for seamless feel.
+- **Lines:** Each line is a separate `<div class="line">` with `white-space: pre`. Lines are "locked" once the next line begins — content never changes. Line breaking is computed in JS (not CSS wrapping).
+- **Zoom:** Continuous. CSS `transform: scale(S)` on `#text-world` container. Text always rendered at `BASE_FONT_SIZE` (48px). Scale interpolated between start/end values based on character count with ease-out curve.
+- **Stretch:** Global `letter-spacing` on `#text-display`, computed so a full line fills the viewport at the current scale. Formula: `charW × (scaleStart / S − 1)`. Both scale and stretch animate via momentum (velocity + decay) for smooth transitions.
 - **Cursor:** Positioned via a zero-width anchor `<span>` at end of text. `offsetLeft`/`offsetTop` give exact position within text-world. Cursor div inside text-world, so it scales automatically.
 - **Scroll:** `translateY` offset keeps cursor at lower third. Clamped so text starts at top on short content.
 - **Fade:** CSS gradient overlay on `#viewport`, height tied to line height × scale. Only appears when content scrolls off top.
@@ -82,29 +84,40 @@ Future ideas include analytics and insights built on top of saved sessions.
 - Fade smoothness tuning — test in browser.
 - Zoom transition feel tuning — test in browser.
 
-## Open Design Challenge: Text Width vs. Line Stability
+## Resolved: Text Width vs. Line Stability — Line Locking + Stretch
 
-The zoom system scales a fixed-width text-world via CSS `transform: scale()`. The text-world width must be set in base (unscaled) pixels. This creates a tension:
+The zoom system scales a fixed-width text-world via CSS `transform: scale()`. The challenge was: as scale changes, either the text reflows (dynamic width) or it shrinks away from the edges (fixed width).
 
-**Option A — Dynamic width (current):** Set text-world width to `viewportW / currentScale` on every render. Text always fills the visible area edge-to-edge. **Problem:** as scale changes, the width changes, which causes text to rewrap (lines reshuffle mid-typing). This violates the "rock-solid text block" principle.
+**Solution: locked lines + global letter-spacing stretch.**
 
-**Option B — Fixed width at scaleStart:** Lock text-world width to `viewportW / scaleStart`. Text never reflows. **Problem:** as the user zooms out, the text block gets visually narrower and narrower, leaving large empty margins on the sides. Looks weird.
+Each line of text is a separate DOM element (`<div class="line">`). Once the cursor moves to the next line, the previous line's content is permanently locked — it never reflows regardless of scale or container width changes.
 
-**Option C — Fixed width at scaleEnd:** Lock to the fully-zoomed-out width. No reflow after max zoom. **Problem:** at the start (zoomed in), text extends far beyond the visible area.
+As scale decreases, the text block would shrink away from the screen edges. To prevent this, we compute a single global stretch factor (extra `letter-spacing`) based on what a full line needs to fill the viewport at the current scale. Formula: `letterSpacing = charW × (scaleStart / currentScale − 1)`. This same value is applied uniformly to every line — full lines reach the edge, short lines (like after Enter) stay short but with consistent spacing.
 
-**The core tension:** the text-world can only have one width at a time in base pixels, but the visible area (in base pixels) changes as scale changes. Any single fixed width is wrong for at least one zoom level.
+Scale target updates per character typed. Actual rendered scale and stretch lerp toward their targets via momentum (velocity + decay) for smooth ease-out when the writer starts and stops typing.
 
-**Possible approaches to explore:**
-1. **Snap width at thresholds** — only update width at a few discrete breakpoints (e.g. every 100 chars), making reflows rare and predictable rather than per-keystroke.
-2. **Animate width changes** — when width needs to change, transition it smoothly over ~500ms so the reflow feels intentional rather than jarring.
-3. **Fixed width + visual fill** — use Option B but adjust padding/margins so the text block stays visually centered and the narrowing feels like a natural "page" getting smaller.
-4. **Variable font size instead of scale** — abandon CSS scale, dynamically change the actual font size (like the old code did). Text naturally fills the viewport at every size. No scale, no width mismatch. But loses the "camera pulling back" metaphor.
+**Two line-breaking modes** (dev toggle via Ctrl+Shift+J):
+- **Justified Flow** (`break-all`): Characters break at exact `charsPerLine` boundaries. Dense rectangle.
+- **Natural Flow** (`word-wrap`): Break at word boundaries. Ragged right edge.
+
+Both use the same stretch mechanism. Default is Justified Flow.
 
 ## Next Step
-Resolve the text width vs. line stability challenge. Then tune zoom and fade momentum CONFIG values by feel.
+Tune zoom, stretch, and fade momentum CONFIG values by feel in the browser.
 
 ---
 ## Changelog
+### 2026-03-14 — Line locking + stretch (text width stability resolved)
+- Resolved the Open Design Challenge: text no longer reflows during zoom.
+- Each line rendered as a separate `<div class="line">` that locks once the next line begins.
+- Added global letter-spacing stretch: computed from scale so full lines always fill the viewport.
+- Scale and stretch both animate via momentum (acceleration + decay) for smooth ease-out.
+- Combined zoom + stretch into a single rAF animation loop.
+- Removed dynamic text-world width updates — width is now fixed at max stretch case.
+- Added two line-breaking modes as dev toggle (Ctrl+Shift+J): Justified Flow (break-all) and Natural Flow (word-wrap).
+- Line splitting computed in JS; CSS `white-space: pre` on each line div prevents browser reflow.
+- Status: Partially Implemented (needs in-browser tuning of momentum values)
+
 ### 2026-03-13 — Momentum animations, RTL fix, responsive width fix
 - Added momentum-based zoom animation (acceleration + decay via rAF). Zoom now glides smoothly when typing and decays gently when stopping.
 - Added momentum-based fade animation for the top gradient overlay.
