@@ -23,8 +23,10 @@ const CONFIG = {
     ZOOM_ACCELERATION: 0.015,
     ZOOM_DECAY: 0.98,
     ZOOM_MIN_VELOCITY: 0.000002,
-    // Line break mode: 'justified' (break-all, dense rectangle) or 'natural' (word-wrap, ragged right)
-    LINE_BREAK_MODE: 'justified',
+    // Line break mode: 'squeeze' (default), 'justified', or 'natural'
+    LINE_BREAK_MODE: 'squeeze',
+    // Squeeze: minimum char width ratio before safety-valve mid-word break
+    SQUEEZE_MIN_RATIO: 0.5,
 };
 
 
@@ -172,7 +174,8 @@ class WritingApp {
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'J') {
                 e.preventDefault();
-                CONFIG.LINE_BREAK_MODE = CONFIG.LINE_BREAK_MODE === 'justified' ? 'natural' : 'justified';
+                const modes = ['squeeze', 'justified', 'natural'];
+                CONFIG.LINE_BREAK_MODE = modes[(modes.indexOf(CONFIG.LINE_BREAK_MODE) + 1) % modes.length];
                 this.lockedLines = [];
                 this.updateLines();
                 this.fullRender();
@@ -228,7 +231,7 @@ class WritingApp {
     getLockedCharCount() {
         let n = 0;
         for (const line of this.lockedLines) {
-            n += line.text.length + (line.hasNewline ? 1 : 0);
+            n += line.text.length + (line.hasNewline ? 1 : 0) + (line.hasDropSpace ? 1 : 0);
         }
         return n;
     }
@@ -243,12 +246,12 @@ class WritingApp {
             // Backspace past locked boundary — pop lines
             while (this.lockedLines.length > 0 && consumed > this.text.length) {
                 const popped = this.lockedLines.pop();
-                consumed -= popped.text.length + (popped.hasNewline ? 1 : 0);
+                consumed -= popped.text.length + (popped.hasNewline ? 1 : 0) + (popped.hasDropSpace ? 1 : 0);
             }
         } else if (this.lockedLines.length > 0) {
             // Spot-check last locked line still matches the text
             const last = this.lockedLines[this.lockedLines.length - 1];
-            const end = consumed - (last.hasNewline ? 1 : 0);
+            const end = consumed - (last.hasNewline ? 1 : 0) - (last.hasDropSpace ? 1 : 0);
             const start = end - last.text.length;
             if (start < 0 || this.text.slice(start, end) !== last.text) {
                 this.lockedLines = [];
@@ -256,30 +259,89 @@ class WritingApp {
             }
         }
 
-        // Process remaining text with current charsPerLine
+        // Process remaining text
         const remaining = this.text.slice(consumed);
+
+        if (CONFIG.LINE_BREAK_MODE === 'squeeze') {
+            this.processRemainingSqueeze(remaining, cpl, targetScale);
+        } else {
+            this.processRemainingFlow(remaining, cpl, targetScale);
+        }
+    }
+
+    processRemainingSqueeze(remaining, cpl, birthScale) {
+        const refWidth = (this.viewportW / birthScale) - 40;
+        const maxChars = Math.floor(refWidth / (this.charW * CONFIG.SQUEEZE_MIN_RATIO));
+        let lineStart = 0;
+
+        for (let i = 0; i < remaining.length; i++) {
+            const ch = remaining[i];
+            const lineLen = i - lineStart + 1;
+
+            if (ch === '\n') {
+                this.lockedLines.push({
+                    text: remaining.slice(lineStart, i),
+                    birthScale,
+                    hasNewline: true,
+                    hasDropSpace: false,
+                });
+                lineStart = i + 1;
+                continue;
+            }
+
+            if (ch === ' ') {
+                const remainingRoom = cpl - lineLen;
+                if (remainingRoom <= 2) {
+                    // Line drop: lock line, consume space
+                    this.lockedLines.push({
+                        text: remaining.slice(lineStart, i),
+                        birthScale,
+                        hasNewline: false,
+                        hasDropSpace: true,
+                    });
+                    lineStart = i + 1;
+                    continue;
+                }
+            }
+
+            // Safety valve: force mid-word break at max squeeze
+            if (lineLen > maxChars) {
+                this.lockedLines.push({
+                    text: remaining.slice(lineStart, i),
+                    birthScale,
+                    hasNewline: false,
+                    hasDropSpace: false,
+                });
+                lineStart = i;
+            }
+        }
+
+        this.activeLine = remaining.slice(lineStart);
+    }
+
+    processRemainingFlow(remaining, cpl, birthScale) {
         const paragraphs = remaining.split('\n');
 
-        // All paragraphs except the last end with \n → all their lines are locked
         for (let p = 0; p < paragraphs.length - 1; p++) {
             const lines = this.wrapParagraph(paragraphs[p], cpl);
             for (let i = 0; i < lines.length; i++) {
                 this.lockedLines.push({
                     text: lines[i],
-                    birthScale: targetScale,
+                    birthScale,
                     hasNewline: i === lines.length - 1,
+                    hasDropSpace: false,
                 });
             }
         }
 
-        // Last paragraph: split into locked lines + active line
         const lastPara = paragraphs[paragraphs.length - 1];
         const lastLines = this.wrapParagraph(lastPara, cpl);
         for (let i = 0; i < lastLines.length - 1; i++) {
             this.lockedLines.push({
                 text: lastLines[i],
-                birthScale: targetScale,
+                birthScale,
                 hasNewline: false,
+                hasDropSpace: false,
             });
         }
         this.activeLine = lastLines[lastLines.length - 1] || '';
@@ -348,11 +410,22 @@ class WritingApp {
         let html = '';
         for (const line of this.lockedLines) {
             const n = line.text.length;
-            const stretch = n > 0 ? Math.max(0, targetWidth / n - this.charW) : 0;
+            const stretch = n > 0 ? targetWidth / n - this.charW : 0;
             html += `<div class="line" style="letter-spacing:${stretch}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
         }
-        html += '<div class="line active" style="letter-spacing:0px">' + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
+        const activeLS = this.getActiveLineSpacing(scale);
+        html += `<div class="line active" style="letter-spacing:${activeLS}px">` + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
         this.textDisplay.innerHTML = html;
+    }
+
+    getActiveLineSpacing(scale) {
+        if (CONFIG.LINE_BREAK_MODE !== 'squeeze') return 0;
+        const n = this.activeLine.length;
+        if (n === 0) return 0;
+        const cpl = this.getCharsPerLine(scale);
+        if (n <= cpl) return 0;
+        const refWidth = (this.viewportW / scale) - 40;
+        return Math.max(refWidth / n - this.charW, -(this.charW * (1 - CONFIG.SQUEEZE_MIN_RATIO)));
     }
 
     escapeHtml(text) {
@@ -429,12 +502,13 @@ class WritingApp {
         const children = this.textDisplay.children;
         for (let i = 0; i < this.lockedLines.length && i < children.length; i++) {
             const n = this.lockedLines[i].text.length;
-            const stretch = n > 0 ? Math.max(0, targetWidth / n - this.charW) : 0;
+            const stretch = n > 0 ? targetWidth / n - this.charW : 0;
             children[i].style.letterSpacing = stretch + 'px';
         }
-        // Active line: always 0 stretch
+        // Active line: 0 stretch, or squeeze if overflowing in squeeze mode
         if (children.length > 0) {
-            children[children.length - 1].style.letterSpacing = '0px';
+            const activeLS = this.getActiveLineSpacing(scale);
+            children[children.length - 1].style.letterSpacing = activeLS + 'px';
         }
     }
 
