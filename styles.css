@@ -54,9 +54,11 @@ html, body {
 #text-display {
     font-family: 'Courier New', monospace;
     color: black;
-    white-space: pre-wrap;
-    word-break: break-all;
     line-height: 1.4;
+}
+
+.line {
+    white-space: pre;
 }
 
 #text-display.rtl {

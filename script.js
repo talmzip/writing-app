@@ -9,8 +9,6 @@ const CONFIG = {
     ZOOM_RAMP_CHARS: 360,     // ~60 words written = fully zoomed out
     AVG_CHARS_PER_WORD: 6,
     BASE_FONT_SIZE: 48,
-    ZOOM_TRANSITION_MS: 350,
-    ZOOM_EASING: 'cubic-bezier(0.25, 0.1, 0.25, 1.0)',
     CURSOR_VERTICAL_POSITION: 2 / 3,
     FADE_LINE_FRACTION: 0.5,
     FONT_FAMILY: "'Courier New', monospace",
@@ -21,10 +19,15 @@ const CONFIG = {
     FADE_ACCELERATION: 0.15,
     FADE_DECAY: 0.92,
     FADE_MIN_VELOCITY: 0.3,
-    // Smooth zoom momentum
+    // Smooth zoom+stretch momentum
     ZOOM_ACCELERATION: 0.015,
     ZOOM_DECAY: 0.98,
     ZOOM_MIN_VELOCITY: 0.000002,
+    STRETCH_ACCELERATION: 0.015,
+    STRETCH_DECAY: 0.98,
+    STRETCH_MIN_VELOCITY: 0.001,
+    // Line break mode: 'justified' (break-all, dense rectangle) or 'natural' (word-wrap, ragged right)
+    LINE_BREAK_MODE: 'justified',
 };
 
 
@@ -51,9 +54,14 @@ class WritingApp {
         this.lineH = 0;
         this.viewportW = 0;
         this.viewportH = 0;
-        this.textWorldWidth = 0;
         this.scaleStart = 1;
         this.scaleEnd = 1;
+
+        // Line metrics
+        this.referenceWidth = 0;
+        this.charsPerLine = 0;
+        this.lockedLines = [];
+        this.activeLine = '';
 
         // Smooth fade momentum
         this.fadeVelocity = 0;
@@ -61,10 +69,13 @@ class WritingApp {
         this.fadeTargetHeight = 0;
         this.fadeAnimationId = null;
 
-        // Smooth zoom momentum
+        // Smooth zoom+stretch momentum
         this.zoomVelocity = 0;
         this.zoomTargetScale = 1;
-        this.zoomAnimationId = null;
+        this.currentStretch = 0;
+        this.stretchTarget = 0;
+        this.stretchVelocity = 0;
+        this.animationId = null;
 
         this.init();
     }
@@ -75,8 +86,8 @@ class WritingApp {
         this.computeZoomScales();
         this.currentScale = this.scaleStart;
         this.zoomTargetScale = this.scaleStart;
+        this.computeLineMetrics();
         this.setupTextWorld();
-        this.updateTextWorldWidth();
         this.setupEventListeners();
         this.render();
         this.focusInput();
@@ -120,19 +131,21 @@ class WritingApp {
         this.scaleEnd = Math.min(1.0, Math.sqrt((vw * vh) / (CONFIG.ZOOM_END_CHARS * cw * lh)));
     }
 
+    computeLineMetrics() {
+        // Reference width at scaleStart — text fills viewport with no stretch needed
+        this.referenceWidth = (this.viewportW / this.scaleStart) - 40;
+        this.charsPerLine = Math.floor(this.referenceWidth / this.charW);
+        if (this.charsPerLine < 1) this.charsPerLine = 1;
+    }
+
     setupTextWorld() {
         this.textDisplay.style.fontFamily = CONFIG.FONT_FAMILY;
         this.textDisplay.style.fontSize = CONFIG.BASE_FONT_SIZE + 'px';
         this.textDisplay.style.lineHeight = String(CONFIG.LINE_HEIGHT);
-    }
-
-    updateTextWorldWidth() {
-        // Width tracks current scale so text always fills the visible area
-        const scale = this.currentScale;
-        const visibleWidth = this.viewportW / scale;
-        this.textWorldWidth = visibleWidth - 40;
-        this.textDisplay.style.width = this.textWorldWidth + 'px';
-        this.textWorld.style.width = (this.textWorldWidth + 40) + 'px';
+        // Fixed width: accommodate max stretch at scaleEnd
+        const maxWidth = this.viewportW / this.scaleEnd;
+        this.textDisplay.style.width = maxWidth + 'px';
+        this.textWorld.style.width = (maxWidth + 40) + 'px';
     }
 
     setupEventListeners() {
@@ -163,6 +176,19 @@ class WritingApp {
         }
         window.addEventListener('resize', resizeHandler);
 
+        // Dev toggle: Ctrl+Shift+J switches line-break mode
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'J') {
+                e.preventDefault();
+                CONFIG.LINE_BREAK_MODE = CONFIG.LINE_BREAK_MODE === 'justified' ? 'natural' : 'justified';
+                this.updateLines();
+                this.fullRender();
+                this.positionCursor();
+                this.updateTransform();
+                console.log('Line break mode:', CONFIG.LINE_BREAK_MODE);
+            }
+        });
+
         // Sessions toggle
         document.getElementById('sessions-toggle').addEventListener('click', (e) => {
             e.stopPropagation();
@@ -188,6 +214,7 @@ class WritingApp {
         this.text = text;
         this.wordCount = this.countWords();
         this.detectRTL();
+        this.updateLines();
         this.render();
     }
 
@@ -203,14 +230,63 @@ class WritingApp {
         return trimmed.split(/\s+/).length;
     }
 
+    // ── Line Splitting ──
+
+    splitIntoLines(text) {
+        const maxChars = this.charsPerLine;
+        if (maxChars <= 0) return [text || ''];
+        if (!text) return [''];
+
+        const lines = [];
+        const paragraphs = text.split('\n');
+
+        for (const para of paragraphs) {
+            if (para === '') {
+                lines.push('');
+                continue;
+            }
+
+            if (CONFIG.LINE_BREAK_MODE === 'justified') {
+                for (let i = 0; i < para.length; i += maxChars) {
+                    lines.push(para.slice(i, i + maxChars));
+                }
+            } else {
+                // Natural word-boundary wrapping
+                let remaining = para;
+                while (remaining.length > maxChars) {
+                    let breakAt = remaining.lastIndexOf(' ', maxChars);
+                    if (breakAt <= 0) breakAt = maxChars;
+                    lines.push(remaining.slice(0, breakAt));
+                    remaining = remaining.slice(breakAt).replace(/^ /, '');
+                }
+                lines.push(remaining);
+            }
+        }
+
+        return lines;
+    }
+
+    updateLines() {
+        const allLines = this.splitIntoLines(this.text);
+        this.lockedLines = allLines.slice(0, -1);
+        this.activeLine = allLines.length > 0 ? allLines[allLines.length - 1] : '';
+    }
+
+    // ── Zoom & Stretch ──
+
     getScale() {
-        // Continuous zoom: interpolate between scaleStart and scaleEnd
-        // based on how much text has been written
         const charCount = this.text.length;
         const t = Math.min(charCount / CONFIG.ZOOM_RAMP_CHARS, 1.0);
-        // Ease-out curve for smooth deceleration
         const eased = 1 - Math.pow(1 - t, 2);
         return this.scaleStart + (this.scaleEnd - this.scaleStart) * eased;
+    }
+
+    getStretchTarget() {
+        const S = this.zoomTargetScale;
+        // letter-spacing that makes a full line fill the viewport at scale S
+        // charsPerLine * (charW + ls) * S = charsPerLine * charW * scaleStart
+        // ls = charW * (scaleStart / S - 1)
+        return Math.max(0, this.charW * (this.scaleStart / S - 1));
     }
 
     detectRTL() {
@@ -222,18 +298,29 @@ class WritingApp {
         }
     }
 
+    // ── Rendering ──
+
     render() {
         this.zoomTargetScale = this.getScale();
+        this.stretchTarget = this.getStretchTarget();
 
-        const escaped = this.escapeHtml(this.text);
-        this.textDisplay.innerHTML = escaped + '<span id="cursor-anchor">\u200B</span>';
-
+        this.fullRender();
         this.positionCursor();
-        // Kick zoom velocity toward target
-        const diff = this.zoomTargetScale - this.currentScale;
-        this.zoomVelocity += diff * CONFIG.ZOOM_ACCELERATION;
-        this.startZoomAnimation();
+
+        // Kick zoom + stretch animations
+        this.zoomVelocity += (this.zoomTargetScale - this.currentScale) * CONFIG.ZOOM_ACCELERATION;
+        this.stretchVelocity += (this.stretchTarget - this.currentStretch) * CONFIG.STRETCH_ACCELERATION;
+        this.startAnimation();
         this.updateFade();
+    }
+
+    fullRender() {
+        let html = '';
+        for (const line of this.lockedLines) {
+            html += '<div class="line">' + (this.escapeHtml(line) || '&nbsp;') + '</div>';
+        }
+        html += '<div class="line active">' + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
+        this.textDisplay.innerHTML = html;
     }
 
     escapeHtml(text) {
@@ -266,8 +353,7 @@ class WritingApp {
 
         let transform;
         if (this.isRTL) {
-            // For RTL: position text-world so its right edge aligns with viewport right edge
-            const textWorldTotalWidth = this.textWorldWidth + 40;
+            const textWorldTotalWidth = parseFloat(this.textWorld.style.width);
             const offsetX = this.viewportW - (textWorldTotalWidth * scale);
             transform = `translateX(${offsetX}px) translateY(${clampedOffsetY}px) scale(${scale})`;
         } else {
@@ -278,27 +364,46 @@ class WritingApp {
         this.currentOffsetY = clampedOffsetY;
     }
 
-    startZoomAnimation() {
-        if (this.zoomAnimationId) return;
+    // ── Combined Zoom + Stretch Animation ──
+
+    startAnimation() {
+        if (this.animationId) return;
         const tick = () => {
+            // Zoom
             this.zoomVelocity *= CONFIG.ZOOM_DECAY;
             this.currentScale += this.zoomVelocity;
-            this.updateTextWorldWidth();
+
+            // Stretch
+            this.stretchVelocity *= CONFIG.STRETCH_DECAY;
+            this.currentStretch = Math.max(0, this.currentStretch + this.stretchVelocity);
+
+            // Apply stretch
+            this.textDisplay.style.letterSpacing = this.currentStretch + 'px';
+
             this.updateTransform();
             this.updateFade();
-            // Stop when settled
-            if (Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
-                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005) {
+
+            // Check if settled
+            const zoomSettled = Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
+                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005;
+            const stretchSettled = Math.abs(this.stretchVelocity) < CONFIG.STRETCH_MIN_VELOCITY &&
+                Math.abs(this.currentStretch - this.stretchTarget) < 0.01;
+
+            if (zoomSettled && stretchSettled) {
                 this.currentScale = this.zoomTargetScale;
+                this.currentStretch = this.stretchTarget;
+                this.textDisplay.style.letterSpacing = this.currentStretch + 'px';
                 this.updateTransform();
                 this.updateFade();
-                this.zoomAnimationId = null;
+                this.animationId = null;
                 return;
             }
-            this.zoomAnimationId = requestAnimationFrame(tick);
+            this.animationId = requestAnimationFrame(tick);
         };
-        this.zoomAnimationId = requestAnimationFrame(tick);
+        this.animationId = requestAnimationFrame(tick);
     }
+
+    // ── Fade ──
 
     updateFade() {
         if (this.currentOffsetY < -1) {
@@ -339,10 +444,13 @@ class WritingApp {
     handleResize() {
         this.updateViewportSize();
         this.computeZoomScales();
+        this.computeLineMetrics();
         this.currentScale = this.getScale();
         this.zoomTargetScale = this.currentScale;
+        this.currentStretch = this.getStretchTarget();
+        this.stretchTarget = this.currentStretch;
         this.setupTextWorld();
-        this.updateTextWorldWidth();
+        this.updateLines();
         this.render();
     }
 
