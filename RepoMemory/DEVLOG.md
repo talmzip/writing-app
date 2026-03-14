@@ -1,5 +1,12 @@
 # Dev Log
 
+## 2026-03-14 — Graduated stretch + mobile keyboard
+- Changed from uniform to graduated per-line stretch based on birth scale
+- Active line always has 0 letter-spacing; older lines stretch more
+- Graduated factor blends to uniform at max zoom
+- Removed separate stretch animation — derived from scale each frame
+- Added autofocus + document touchstart focus for mobile keyboard
+
 ## 2026-03-14 — Line locking + stretch mechanism
 - Resolved text width vs. line stability challenge
 - Each line is now a separate `<div class="line">` that locks permanently once the next line begins
