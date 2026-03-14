@@ -23,9 +23,6 @@ const CONFIG = {
     ZOOM_ACCELERATION: 0.015,
     ZOOM_DECAY: 0.98,
     ZOOM_MIN_VELOCITY: 0.000002,
-    STRETCH_ACCELERATION: 0.015,
-    STRETCH_DECAY: 0.98,
-    STRETCH_MIN_VELOCITY: 0.001,
     // Line break mode: 'justified' (break-all, dense rectangle) or 'natural' (word-wrap, ragged right)
     LINE_BREAK_MODE: 'justified',
 };
@@ -69,12 +66,9 @@ class WritingApp {
         this.fadeTargetHeight = 0;
         this.fadeAnimationId = null;
 
-        // Smooth zoom+stretch momentum
+        // Smooth zoom momentum
         this.zoomVelocity = 0;
         this.zoomTargetScale = 1;
-        this.currentStretch = 0;
-        this.stretchTarget = 0;
-        this.stretchVelocity = 0;
         this.animationId = null;
 
         this.init();
@@ -160,13 +154,16 @@ class WritingApp {
             e.preventDefault();
             this.focusInput();
         });
+        // Mobile: force keyboard open on first touch if autofocus was blocked
+        document.addEventListener('touchstart', () => this.focusInput(), { once: true });
+
         // Refocus on blur, but not if sessions screen is open
         this.hiddenInput.addEventListener('blur', () => {
             setTimeout(() => {
                 if (document.getElementById('sessions-screen').classList.contains('hidden')) {
                     this.focusInput();
                 }
-            }, 100);
+            }, 50);
         });
 
         // Resize
@@ -268,7 +265,17 @@ class WritingApp {
 
     updateLines() {
         const allLines = this.splitIntoLines(this.text);
-        this.lockedLines = allLines.slice(0, -1);
+        const newLockedTexts = allLines.slice(0, -1);
+        const currentTargetScale = this.getScale();
+        const result = [];
+        for (let i = 0; i < newLockedTexts.length; i++) {
+            if (i < this.lockedLines.length && this.lockedLines[i].text === newLockedTexts[i]) {
+                result.push(this.lockedLines[i]);
+            } else {
+                result.push({ text: newLockedTexts[i], birthScale: currentTargetScale });
+            }
+        }
+        this.lockedLines = result;
         this.activeLine = allLines.length > 0 ? allLines[allLines.length - 1] : '';
     }
 
@@ -279,14 +286,6 @@ class WritingApp {
         const t = Math.min(charCount / CONFIG.ZOOM_RAMP_CHARS, 1.0);
         const eased = 1 - Math.pow(1 - t, 2);
         return this.scaleStart + (this.scaleEnd - this.scaleStart) * eased;
-    }
-
-    getStretchTarget() {
-        const S = this.zoomTargetScale;
-        // letter-spacing that makes a full line fill the viewport at scale S
-        // charsPerLine * (charW + ls) * S = charsPerLine * charW * scaleStart
-        // ls = charW * (scaleStart / S - 1)
-        return Math.max(0, this.charW * (this.scaleStart / S - 1));
     }
 
     detectRTL() {
@@ -302,24 +301,29 @@ class WritingApp {
 
     render() {
         this.zoomTargetScale = this.getScale();
-        this.stretchTarget = this.getStretchTarget();
 
         this.fullRender();
         this.positionCursor();
 
-        // Kick zoom + stretch animations
+        // Kick zoom animation (stretch is derived from scale per line)
         this.zoomVelocity += (this.zoomTargetScale - this.currentScale) * CONFIG.ZOOM_ACCELERATION;
-        this.stretchVelocity += (this.stretchTarget - this.currentStretch) * CONFIG.STRETCH_ACCELERATION;
         this.startAnimation();
         this.updateFade();
     }
 
     fullRender() {
+        const scale = this.currentScale;
+        const graduatedFactor = Math.max(0, Math.min(1,
+            (scale - this.scaleEnd) / (this.scaleStart - this.scaleEnd)));
+        const uniformStretch = Math.max(0, this.charW * (this.scaleStart / scale - 1));
+
         let html = '';
         for (const line of this.lockedLines) {
-            html += '<div class="line">' + (this.escapeHtml(line) || '&nbsp;') + '</div>';
+            const birthStretch = Math.max(0, this.charW * (line.birthScale / scale - 1));
+            const stretch = uniformStretch + (birthStretch - uniformStretch) * graduatedFactor;
+            html += `<div class="line" style="letter-spacing:${stretch}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
         }
-        html += '<div class="line active">' + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
+        html += '<div class="line active" style="letter-spacing:0px">' + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
         this.textDisplay.innerHTML = html;
     }
 
@@ -364,35 +368,22 @@ class WritingApp {
         this.currentOffsetY = clampedOffsetY;
     }
 
-    // ── Combined Zoom + Stretch Animation ──
+    // ── Zoom Animation ──
 
     startAnimation() {
         if (this.animationId) return;
         const tick = () => {
-            // Zoom
             this.zoomVelocity *= CONFIG.ZOOM_DECAY;
             this.currentScale += this.zoomVelocity;
 
-            // Stretch
-            this.stretchVelocity *= CONFIG.STRETCH_DECAY;
-            this.currentStretch = Math.max(0, this.currentStretch + this.stretchVelocity);
-
-            // Apply stretch
-            this.textDisplay.style.letterSpacing = this.currentStretch + 'px';
-
+            this.applyStretch();
             this.updateTransform();
             this.updateFade();
 
-            // Check if settled
-            const zoomSettled = Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
-                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005;
-            const stretchSettled = Math.abs(this.stretchVelocity) < CONFIG.STRETCH_MIN_VELOCITY &&
-                Math.abs(this.currentStretch - this.stretchTarget) < 0.01;
-
-            if (zoomSettled && stretchSettled) {
+            if (Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
+                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005) {
                 this.currentScale = this.zoomTargetScale;
-                this.currentStretch = this.stretchTarget;
-                this.textDisplay.style.letterSpacing = this.currentStretch + 'px';
+                this.applyStretch();
                 this.updateTransform();
                 this.updateFade();
                 this.animationId = null;
@@ -401,6 +392,26 @@ class WritingApp {
             this.animationId = requestAnimationFrame(tick);
         };
         this.animationId = requestAnimationFrame(tick);
+    }
+
+    applyStretch() {
+        const scale = this.currentScale;
+        // graduatedFactor: 1 at scaleStart (fully graduated), 0 at scaleEnd (uniform)
+        const graduatedFactor = Math.max(0, Math.min(1,
+            (scale - this.scaleEnd) / (this.scaleStart - this.scaleEnd)));
+        // Uniform stretch: what a line born at scaleStart needs
+        const uniformStretch = Math.max(0, this.charW * (this.scaleStart / scale - 1));
+
+        const children = this.textDisplay.children;
+        for (let i = 0; i < this.lockedLines.length && i < children.length; i++) {
+            const birthStretch = Math.max(0, this.charW * (this.lockedLines[i].birthScale / scale - 1));
+            const stretch = uniformStretch + (birthStretch - uniformStretch) * graduatedFactor;
+            children[i].style.letterSpacing = stretch + 'px';
+        }
+        // Active line: always 0 stretch
+        if (children.length > 0) {
+            children[children.length - 1].style.letterSpacing = '0px';
+        }
     }
 
     // ── Fade ──
@@ -447,8 +458,6 @@ class WritingApp {
         this.computeLineMetrics();
         this.currentScale = this.getScale();
         this.zoomTargetScale = this.currentScale;
-        this.currentStretch = this.getStretchTarget();
-        this.stretchTarget = this.currentStretch;
         this.setupTextWorld();
         this.updateLines();
         this.render();
