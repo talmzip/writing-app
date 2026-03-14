@@ -72,7 +72,7 @@ Future ideas include analytics and insights built on top of saved sessions.
 - **Rendering:** Text rendered into `#text-display` with `white-space: pre-wrap` and `word-break: break-all`. Words split mid-word to maintain a solid rectangle text block.
 - **Lines:** Each line is a separate `<div class="line">` with `white-space: pre`. Lines are "locked" once the next line begins — content never changes. Line breaking is computed in JS (not CSS wrapping).
 - **Zoom:** Continuous. CSS `transform: scale(S)` on `#text-world` container. Text always rendered at `BASE_FONT_SIZE` (48px). Scale interpolated between start/end values based on character count with ease-out curve.
-- **Stretch:** Global `letter-spacing` on `#text-display`, computed so a full line fills the viewport at the current scale. Formula: `charW × (scaleStart / S − 1)`. Both scale and stretch animate via momentum (velocity + decay) for smooth transitions.
+- **Stretch:** Per-line `letter-spacing` based on each line's birth scale. Graduated during zoom-out (active line = 0 stretch, older lines = more stretch), settling to uniform at max zoom. Derived from current scale each frame — no separate animation.
 - **Cursor:** Positioned via a zero-width anchor `<span>` at end of text. `offsetLeft`/`offsetTop` give exact position within text-world. Cursor div inside text-world, so it scales automatically.
 - **Scroll:** `translateY` offset keeps cursor at lower third. Clamped so text starts at top on short content.
 - **Fade:** CSS gradient overlay on `#viewport`, height tied to line height × scale. Only appears when content scrolls off top.
@@ -92,9 +92,13 @@ The zoom system scales a fixed-width text-world via CSS `transform: scale()`. Th
 
 Each line of text is a separate DOM element (`<div class="line">`). Once the cursor moves to the next line, the previous line's content is permanently locked — it never reflows regardless of scale or container width changes.
 
-As scale decreases, the text block would shrink away from the screen edges. To prevent this, we compute a single global stretch factor (extra `letter-spacing`) based on what a full line needs to fill the viewport at the current scale. Formula: `letterSpacing = charW × (scaleStart / currentScale − 1)`. This same value is applied uniformly to every line — full lines reach the edge, short lines (like after Enter) stay short but with consistent spacing.
+As scale decreases, the text block would shrink away from the screen edges. To prevent this, we apply **graduated letter-spacing stretch** based on each line's birth scale — the scale at which it was the active line.
 
-Scale target updates per character typed. Actual rendered scale and stretch lerp toward their targets via momentum (velocity + decay) for smooth ease-out when the writer starts and stops typing.
+**Graduated stretch:** Each locked line remembers what scale it was written at. The stretch applied to that line is proportional to the difference between its birth scale and the current scale. Lines written early (large birth scale) accumulate more stretch. The active line's birth scale equals current scale, so its stretch is always zero — typing always feels like a fresh blank page.
+
+As zoom-out completes (scale reaches scaleEnd), the graduated factor eases to 0 and all locked lines settle to the same uniform stretch, filling the viewport edge-to-edge.
+
+Scale target updates per character typed. Actual rendered scale lerps toward its target via momentum (velocity + decay) for smooth ease-out. Per-line stretch is derived directly from the current scale each animation frame.
 
 **Two line-breaking modes** (dev toggle via Ctrl+Shift+J):
 - **Justified Flow** (`break-all`): Characters break at exact `charsPerLine` boundaries. Dense rectangle.
@@ -107,16 +111,24 @@ Tune zoom, stretch, and fade momentum CONFIG values by feel in the browser.
 
 ---
 ## Changelog
+### 2026-03-14 — Graduated stretch + mobile keyboard fix
+- Changed from uniform stretch to graduated per-line stretch based on birth scale.
+- Each locked line stores its birth scale. Stretch = `charW × (birthScale / currentScale − 1)`.
+- Active line always has 0 letter-spacing — typing feels like a fresh page.
+- Graduated factor eases from 1 (fully graduated) to 0 (uniform) as scale approaches scaleEnd.
+- Removed separate stretch momentum animation — stretch is now derived from scale each frame.
+- Added `autofocus` to hidden textarea and document-level touchstart focus for mobile keyboard.
+- Reduced blur-refocus delay from 100ms to 50ms for snappier keyboard recovery.
+- Status: Partially Implemented (needs in-browser tuning)
+
 ### 2026-03-14 — Line locking + stretch (text width stability resolved)
 - Resolved the Open Design Challenge: text no longer reflows during zoom.
 - Each line rendered as a separate `<div class="line">` that locks once the next line begins.
-- Added global letter-spacing stretch: computed from scale so full lines always fill the viewport.
-- Scale and stretch both animate via momentum (acceleration + decay) for smooth ease-out.
-- Combined zoom + stretch into a single rAF animation loop.
+- Added letter-spacing stretch computed from scale so full lines always fill the viewport.
+- Zoom animates via momentum (acceleration + decay) for smooth ease-out.
 - Removed dynamic text-world width updates — width is now fixed at max stretch case.
 - Added two line-breaking modes as dev toggle (Ctrl+Shift+J): Justified Flow (break-all) and Natural Flow (word-wrap).
 - Line splitting computed in JS; CSS `white-space: pre` on each line div prevents browser reflow.
-- Status: Partially Implemented (needs in-browser tuning of momentum values)
 
 ### 2026-03-13 — Momentum animations, RTL fix, responsive width fix
 - Added momentum-based zoom animation (acceleration + decay via rAF). Zoom now glides smoothly when typing and decays gently when stopping.
