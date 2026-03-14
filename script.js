@@ -54,10 +54,8 @@ class WritingApp {
         this.scaleStart = 1;
         this.scaleEnd = 1;
 
-        // Line metrics
-        this.referenceWidth = 0;
-        this.charsPerLine = 0;
-        this.lockedLines = [];
+        // Line state
+        this.lockedLines = []; // { text, birthScale, hasNewline }
         this.activeLine = '';
 
         // Smooth fade momentum
@@ -80,7 +78,6 @@ class WritingApp {
         this.computeZoomScales();
         this.currentScale = this.scaleStart;
         this.zoomTargetScale = this.scaleStart;
-        this.computeLineMetrics();
         this.setupTextWorld();
         this.setupEventListeners();
         this.render();
@@ -125,11 +122,9 @@ class WritingApp {
         this.scaleEnd = Math.min(1.0, Math.sqrt((vw * vh) / (CONFIG.ZOOM_END_CHARS * cw * lh)));
     }
 
-    computeLineMetrics() {
-        // Reference width at scaleStart — text fills viewport with no stretch needed
-        this.referenceWidth = (this.viewportW / this.scaleStart) - 40;
-        this.charsPerLine = Math.floor(this.referenceWidth / this.charW);
-        if (this.charsPerLine < 1) this.charsPerLine = 1;
+    getCharsPerLine(scale) {
+        const width = (this.viewportW / scale) - 40;
+        return Math.max(1, Math.floor(width / this.charW));
     }
 
     setupTextWorld() {
@@ -178,6 +173,7 @@ class WritingApp {
             if (e.ctrlKey && e.shiftKey && e.key === 'J') {
                 e.preventDefault();
                 CONFIG.LINE_BREAK_MODE = CONFIG.LINE_BREAK_MODE === 'justified' ? 'natural' : 'justified';
+                this.lockedLines = [];
                 this.updateLines();
                 this.fullRender();
                 this.positionCursor();
@@ -229,54 +225,88 @@ class WritingApp {
 
     // ── Line Splitting ──
 
-    splitIntoLines(text) {
-        const maxChars = this.charsPerLine;
-        if (maxChars <= 0) return [text || ''];
-        if (!text) return [''];
-
-        const lines = [];
-        const paragraphs = text.split('\n');
-
-        for (const para of paragraphs) {
-            if (para === '') {
-                lines.push('');
-                continue;
-            }
-
-            if (CONFIG.LINE_BREAK_MODE === 'justified') {
-                for (let i = 0; i < para.length; i += maxChars) {
-                    lines.push(para.slice(i, i + maxChars));
-                }
-            } else {
-                // Natural word-boundary wrapping
-                let remaining = para;
-                while (remaining.length > maxChars) {
-                    let breakAt = remaining.lastIndexOf(' ', maxChars);
-                    if (breakAt <= 0) breakAt = maxChars;
-                    lines.push(remaining.slice(0, breakAt));
-                    remaining = remaining.slice(breakAt).replace(/^ /, '');
-                }
-                lines.push(remaining);
-            }
+    getLockedCharCount() {
+        let n = 0;
+        for (const line of this.lockedLines) {
+            n += line.text.length + (line.hasNewline ? 1 : 0);
         }
-
-        return lines;
+        return n;
     }
 
     updateLines() {
-        const allLines = this.splitIntoLines(this.text);
-        const newLockedTexts = allLines.slice(0, -1);
-        const currentTargetScale = this.getScale();
-        const result = [];
-        for (let i = 0; i < newLockedTexts.length; i++) {
-            if (i < this.lockedLines.length && this.lockedLines[i].text === newLockedTexts[i]) {
-                result.push(this.lockedLines[i]);
-            } else {
-                result.push({ text: newLockedTexts[i], birthScale: currentTargetScale });
+        const targetScale = this.getScale();
+        const cpl = this.getCharsPerLine(targetScale);
+
+        // Validate: if text was edited within locked region (select-all, paste), reset
+        let consumed = this.getLockedCharCount();
+        if (consumed > this.text.length) {
+            // Backspace past locked boundary — pop lines
+            while (this.lockedLines.length > 0 && consumed > this.text.length) {
+                const popped = this.lockedLines.pop();
+                consumed -= popped.text.length + (popped.hasNewline ? 1 : 0);
+            }
+        } else if (this.lockedLines.length > 0) {
+            // Spot-check last locked line still matches the text
+            const last = this.lockedLines[this.lockedLines.length - 1];
+            const end = consumed - (last.hasNewline ? 1 : 0);
+            const start = end - last.text.length;
+            if (start < 0 || this.text.slice(start, end) !== last.text) {
+                this.lockedLines = [];
+                consumed = 0;
             }
         }
-        this.lockedLines = result;
-        this.activeLine = allLines.length > 0 ? allLines[allLines.length - 1] : '';
+
+        // Process remaining text with current charsPerLine
+        const remaining = this.text.slice(consumed);
+        const paragraphs = remaining.split('\n');
+
+        // All paragraphs except the last end with \n → all their lines are locked
+        for (let p = 0; p < paragraphs.length - 1; p++) {
+            const lines = this.wrapParagraph(paragraphs[p], cpl);
+            for (let i = 0; i < lines.length; i++) {
+                this.lockedLines.push({
+                    text: lines[i],
+                    birthScale: targetScale,
+                    hasNewline: i === lines.length - 1,
+                });
+            }
+        }
+
+        // Last paragraph: split into locked lines + active line
+        const lastPara = paragraphs[paragraphs.length - 1];
+        const lastLines = this.wrapParagraph(lastPara, cpl);
+        for (let i = 0; i < lastLines.length - 1; i++) {
+            this.lockedLines.push({
+                text: lastLines[i],
+                birthScale: targetScale,
+                hasNewline: false,
+            });
+        }
+        this.activeLine = lastLines[lastLines.length - 1] || '';
+    }
+
+    wrapParagraph(para, cpl) {
+        if (para === '') return [''];
+
+        if (CONFIG.LINE_BREAK_MODE === 'justified') {
+            const lines = [];
+            for (let i = 0; i < para.length; i += cpl) {
+                lines.push(para.slice(i, i + cpl));
+            }
+            return lines;
+        }
+
+        // Natural word-boundary wrapping
+        const lines = [];
+        let remaining = para;
+        while (remaining.length > cpl) {
+            let breakAt = remaining.lastIndexOf(' ', cpl);
+            if (breakAt <= 0) breakAt = cpl;
+            lines.push(remaining.slice(0, breakAt));
+            remaining = remaining.slice(breakAt).replace(/^ /, '');
+        }
+        lines.push(remaining);
+        return lines;
     }
 
     // ── Zoom & Stretch ──
@@ -313,14 +343,12 @@ class WritingApp {
 
     fullRender() {
         const scale = this.currentScale;
-        const graduatedFactor = Math.max(0, Math.min(1,
-            (scale - this.scaleEnd) / (this.scaleStart - this.scaleEnd)));
-        const uniformStretch = Math.max(0, this.charW * (this.scaleStart / scale - 1));
+        const targetWidth = (this.viewportW / scale) - 40;
 
         let html = '';
         for (const line of this.lockedLines) {
-            const birthStretch = Math.max(0, this.charW * (line.birthScale / scale - 1));
-            const stretch = uniformStretch + (birthStretch - uniformStretch) * graduatedFactor;
+            const n = line.text.length;
+            const stretch = n > 0 ? Math.max(0, targetWidth / n - this.charW) : 0;
             html += `<div class="line" style="letter-spacing:${stretch}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
         }
         html += '<div class="line active" style="letter-spacing:0px">' + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
@@ -396,16 +424,12 @@ class WritingApp {
 
     applyStretch() {
         const scale = this.currentScale;
-        // graduatedFactor: 1 at scaleStart (fully graduated), 0 at scaleEnd (uniform)
-        const graduatedFactor = Math.max(0, Math.min(1,
-            (scale - this.scaleEnd) / (this.scaleStart - this.scaleEnd)));
-        // Uniform stretch: what a line born at scaleStart needs
-        const uniformStretch = Math.max(0, this.charW * (this.scaleStart / scale - 1));
+        const targetWidth = (this.viewportW / scale) - 40;
 
         const children = this.textDisplay.children;
         for (let i = 0; i < this.lockedLines.length && i < children.length; i++) {
-            const birthStretch = Math.max(0, this.charW * (this.lockedLines[i].birthScale / scale - 1));
-            const stretch = uniformStretch + (birthStretch - uniformStretch) * graduatedFactor;
+            const n = this.lockedLines[i].text.length;
+            const stretch = n > 0 ? Math.max(0, targetWidth / n - this.charW) : 0;
             children[i].style.letterSpacing = stretch + 'px';
         }
         // Active line: always 0 stretch
@@ -455,10 +479,11 @@ class WritingApp {
     handleResize() {
         this.updateViewportSize();
         this.computeZoomScales();
-        this.computeLineMetrics();
         this.currentScale = this.getScale();
         this.zoomTargetScale = this.currentScale;
         this.setupTextWorld();
+        // Reset lines — charsPerLine changed with viewport
+        this.lockedLines = [];
         this.updateLines();
         this.render();
     }
