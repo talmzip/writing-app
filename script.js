@@ -315,10 +315,8 @@ class WritingApp {
             }
 
             if (ch === ' ') {
-                // After placing this space, how many chars fit for the next word?
-                // In squeeze mode, use max capacity (squeezed chars are narrower).
-                const remainingRoom = maxChars - lineLen;
-                if (remainingRoom <= 2) {
+                const textLen = i - lineStart; // chars on this line before the space
+                if (textLen >= cpl - 1) {
                     this.lockedLines.push({
                         text: remaining.slice(lineStart, i),
                         birthScale,
