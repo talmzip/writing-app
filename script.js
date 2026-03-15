@@ -799,10 +799,19 @@ class WritingApp {
 
     handleResize() {
         const oldW = this.viewportW;
+        const oldH = this.viewportH;
         this.updateViewportSize();
 
-        // Skip recalculation if in reading mode OR if input lost focus (keyboard closing)
-        if (this.isReadingMode || document.activeElement !== this.hiddenInput) return;
+        // Already in reading mode — ignore
+        if (this.isReadingMode) return;
+
+        // Detect keyboard close: height grew significantly, same width
+        const heightGrew = this.viewportH > oldH + 50;
+        const sameWidth = this.viewportW === oldW;
+        if (heightGrew && sameWidth) {
+            this.enterReadingMode();
+            return;
+        }
 
         this.computeZoomScales();
         this.zoomTargetScale = this.getScale();
