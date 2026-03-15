@@ -81,6 +81,10 @@ class WritingApp {
         this.isReadingMode = false;
         this.viewportVelocity = 0;
 
+        // New session button
+        this.newSessionBtn = document.getElementById('new-session-btn');
+        this.inactivityTimer = null;
+
         this.init();
     }
 
@@ -220,6 +224,12 @@ class WritingApp {
             this.saveCurrentSession();
             sessionsUI.show();
         });
+
+        // New session button
+        this.newSessionBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.startNewSession();
+        });
     }
 
     setupPromptOverlay() {
@@ -250,6 +260,8 @@ class WritingApp {
     enterReadingMode() {
         this.isReadingMode = true;
         this.cursorEl.style.display = 'none';
+        this.newSessionBtn.classList.remove('visible');
+        clearTimeout(this.inactivityTimer);
         // Enable native scrolling
         this.viewport.style.overflow = 'auto';
         this.viewport.style.webkitOverflowScrolling = 'touch';
@@ -263,6 +275,7 @@ class WritingApp {
         // Refocus textarea (user gesture context)
         this.hiddenInput.focus({ preventScroll: true });
         // Viewport will resize when keyboard opens — animation handles it
+        this.resetInactivityTimer();
     }
 
     handleInput() {
@@ -279,6 +292,48 @@ class WritingApp {
         this.wordCount = this.countWords();
         this.detectRTL();
         this.updateLines();
+        this.render();
+        this.resetInactivityTimer();
+    }
+
+    resetInactivityTimer() {
+        // Hide button instantly
+        this.newSessionBtn.classList.remove('visible');
+        clearTimeout(this.inactivityTimer);
+        // Show after 2.5s of inactivity (only if there's text)
+        if (this.text.length > 0) {
+            this.inactivityTimer = setTimeout(() => {
+                this.positionNewSessionBtn();
+                this.newSessionBtn.classList.add('visible');
+            }, 2500);
+        }
+    }
+
+    positionNewSessionBtn() {
+        const anchor = document.getElementById('cursor-anchor');
+        if (!anchor) return;
+        const scale = this.currentScale;
+        const cursorScreenY = anchor.offsetTop * scale + this.currentOffsetY;
+        // Place 2 line-heights below cursor
+        const btnY = cursorScreenY + this.lineH * scale * 2.5;
+        this.newSessionBtn.style.top = btnY + 'px';
+        this.newSessionBtn.style.left = '50%';
+        this.newSessionBtn.style.transform = 'translateX(-50%)';
+    }
+
+    startNewSession() {
+        this.saveCurrentSession();
+        this.newSessionBtn.classList.remove('visible');
+        clearTimeout(this.inactivityTimer);
+        // Reset everything
+        this.text = '';
+        this.hiddenInput.value = '';
+        this.wordCount = 0;
+        this.lockedLines = [];
+        this.activeLine = '';
+        this.sessionStartTime = Date.now();
+        this.currentScale = this.scaleStart;
+        this.zoomTargetScale = this.scaleStart;
         this.render();
     }
 
