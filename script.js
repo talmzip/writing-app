@@ -80,6 +80,11 @@ class WritingApp {
         // Reading mode (keyboard closed)
         this.isReadingMode = false;
         this.viewportVelocity = 0;
+        this.readingScrollY = 0;
+        this.readingTouchStartY = 0;
+        this.readingScrollVelocity = 0;
+        this.readingScrollAnimId = null;
+        this.readingScale = 1;
 
         // New session button
         this.newSessionBtn = document.getElementById('new-session-btn');
@@ -168,20 +173,59 @@ class WritingApp {
         });
 
         // Tap to resume writing from reading mode, or refocus in writing mode
+        let touchMoved = false;
         this.viewport.addEventListener('click', () => {
-            if (this.isReadingMode) {
+            if (this.isReadingMode && !touchMoved) {
                 this.enterWritingMode();
-            } else {
+            } else if (!this.isReadingMode) {
                 this.focusInput();
             }
         });
+
+        // Touch handling: writing mode = focus, reading mode = scroll
         this.viewport.addEventListener('touchstart', (e) => {
-            if (!this.isReadingMode) {
+            touchMoved = false;
+            if (this.isReadingMode) {
+                this.readingTouchStartY = e.touches[0].clientY;
+                this.readingScrollStartY = this.readingScrollY;
+                this.readingScrollVelocity = 0;
+                if (this.readingScrollAnimId) {
+                    cancelAnimationFrame(this.readingScrollAnimId);
+                    this.readingScrollAnimId = null;
+                }
+            } else {
                 e.preventDefault();
                 this.focusInput();
             }
-            // In reading mode, let touch events through for native scrolling
         });
+        this.viewport.addEventListener('touchmove', (e) => {
+            if (!this.isReadingMode) return;
+            touchMoved = true;
+            e.preventDefault();
+            const dy = e.touches[0].clientY - this.readingTouchStartY;
+            this.readingScrollVelocity = e.touches[0].clientY - (this._lastTouchY || e.touches[0].clientY);
+            this._lastTouchY = e.touches[0].clientY;
+            this.readingScrollY = this.readingScrollStartY + dy;
+            this.clampReadingScroll();
+            this.applyReadingTransform();
+        }, { passive: false });
+        this.viewport.addEventListener('touchend', (e) => {
+            this._lastTouchY = null;
+            if (!this.isReadingMode) return;
+            if (touchMoved) {
+                e.preventDefault();
+                this.startReadingMomentum();
+            }
+        });
+
+        // Mouse wheel scroll in reading mode
+        this.viewport.addEventListener('wheel', (e) => {
+            if (!this.isReadingMode) return;
+            e.preventDefault();
+            this.readingScrollY -= e.deltaY;
+            this.clampReadingScroll();
+            this.applyReadingTransform();
+        }, { passive: false });
 
         // On blur, check if keyboard was dismissed → enter reading mode
         this.hiddenInput.addEventListener('blur', () => {
@@ -264,16 +308,11 @@ class WritingApp {
         clearTimeout(this.inactivityTimer);
         // Hide fade overlay
         this.fadeOverlay.style.display = 'none';
-        // Keep scale, position from top, leave bottom gap for New button
-        const scale = this.currentScale;
-        const contentHeight = this.textDisplay.scrollHeight * scale;
-        const gap = this.lineH * scale * 3; // space for New button
-        this.textWorld.style.transform = `scale(${scale})`;
-        // Set explicit height so viewport knows scrollable area
-        this.textWorld.style.height = (this.textDisplay.scrollHeight + gap / scale) + 'px';
-        // Enable native scrolling
-        this.viewport.style.overflow = 'auto';
-        this.viewport.style.webkitOverflowScrolling = 'touch';
+        // Freeze the scale — don't let resize change it
+        this.readingScale = this.currentScale;
+        // Start scroll at current writing position
+        this.readingScrollY = this.currentOffsetY;
+        this.applyReadingTransform();
     }
 
     enterWritingMode() {
@@ -281,15 +320,50 @@ class WritingApp {
         this.cursorEl.style.display = '';
         // Restore fade overlay
         this.fadeOverlay.style.display = '';
-        // Restore writing layout
-        this.textWorld.style.height = '';
-        this.viewport.style.overflow = 'hidden';
-        this.viewport.scrollTop = 0;
+        // Stop any reading scroll momentum
+        if (this.readingScrollAnimId) {
+            cancelAnimationFrame(this.readingScrollAnimId);
+            this.readingScrollAnimId = null;
+        }
         // Refocus textarea (user gesture context)
         this.hiddenInput.focus({ preventScroll: true });
         // Re-render to restore transform
         this.updateTransform();
         this.resetInactivityTimer();
+    }
+
+    applyReadingTransform() {
+        const scale = this.readingScale;
+        if (this.isRTL) {
+            const textWorldTotalWidth = parseFloat(this.textWorld.style.width);
+            const offsetX = this.viewportW - (textWorldTotalWidth * scale);
+            this.textWorld.style.transform = `translateX(${offsetX}px) translateY(${this.readingScrollY}px) scale(${scale})`;
+        } else {
+            this.textWorld.style.transform = `translateY(${this.readingScrollY}px) scale(${scale})`;
+        }
+    }
+
+    clampReadingScroll() {
+        const scale = this.readingScale;
+        const contentHeight = this.textDisplay.scrollHeight * scale;
+        const gap = this.lineH * scale * 3;
+        const minY = -(contentHeight - this.viewportH + gap);
+        this.readingScrollY = Math.max(minY, Math.min(0, this.readingScrollY));
+    }
+
+    startReadingMomentum() {
+        const tick = () => {
+            this.readingScrollVelocity *= 0.95;
+            this.readingScrollY += this.readingScrollVelocity;
+            this.clampReadingScroll();
+            this.applyReadingTransform();
+            if (Math.abs(this.readingScrollVelocity) < 0.5) {
+                this.readingScrollAnimId = null;
+                return;
+            }
+            this.readingScrollAnimId = requestAnimationFrame(tick);
+        };
+        this.readingScrollAnimId = requestAnimationFrame(tick);
     }
 
     handleInput() {
@@ -705,6 +779,10 @@ class WritingApp {
     handleResize() {
         const oldW = this.viewportW;
         this.updateViewportSize();
+
+        // In reading mode, ignore resize (scale/spacing frozen)
+        if (this.isReadingMode) return;
+
         this.computeZoomScales();
         this.zoomTargetScale = this.getScale();
 
