@@ -388,9 +388,10 @@ class WritingApp {
         // Hide button instantly
         this.newSessionBtn.classList.remove('visible');
         clearTimeout(this.inactivityTimer);
-        // Show after 2.5s of inactivity (only if there's text)
+        // Show after 2.5s of inactivity (only if there's text and still in writing mode)
         if (this.text.length > 0) {
             this.inactivityTimer = setTimeout(() => {
+                if (this.isReadingMode) return;
                 this.positionNewSessionBtn();
                 this.newSessionBtn.classList.add('visible');
             }, 2500);
@@ -402,8 +403,10 @@ class WritingApp {
         if (!anchor) return;
         const scale = this.currentScale;
         const cursorScreenY = anchor.offsetTop * scale + this.currentOffsetY;
-        // Place 2 line-heights below cursor
-        const btnY = cursorScreenY + this.lineH * scale * 2.5;
+        // Center in the gap between cursor and viewport bottom
+        const gapTop = cursorScreenY + this.lineH * scale;
+        const gapBottom = this.renderedViewportH;
+        const btnY = gapTop + (gapBottom - gapTop) / 2;
         this.newSessionBtn.style.top = btnY + 'px';
         this.newSessionBtn.style.left = '50%';
         this.newSessionBtn.style.transform = 'translateX(-50%)';
