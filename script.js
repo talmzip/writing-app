@@ -80,6 +80,7 @@ class WritingApp {
         // Reading mode (keyboard closed)
         this.isReadingMode = false;
         this.viewportVelocity = 0;
+        this.lastWritingViewportH = 0;
 
         // New session button
         this.newSessionBtn = document.getElementById('new-session-btn');
@@ -182,33 +183,22 @@ class WritingApp {
         });
 
         // Touch handling
-        let touchMoved = false;
+        let touchStartY = 0;
         this.viewport.addEventListener('touchstart', (e) => {
             isTouchDevice = true;
-            touchMoved = false;
+            touchStartY = e.touches[0].clientY;
             if (!this.isReadingMode) {
                 e.preventDefault();
                 this.focusInput();
             }
-        });
-        this.viewport.addEventListener('touchmove', () => {
-            touchMoved = true;
-        });
-        this.viewport.addEventListener('touchend', () => {
+        }, { passive: false });
+        this.viewport.addEventListener('touchend', (e) => {
             if (!this.isReadingMode) return;
-            if (!touchMoved) {
+            // Only enter writing mode on a tap (not a scroll)
+            const touchEndY = e.changedTouches[0].clientY;
+            if (Math.abs(touchEndY - touchStartY) < 10) {
+                e.preventDefault();
                 this.enterWritingMode();
-            }
-        });
-
-        // On blur, check if keyboard was dismissed → enter reading mode
-        this.hiddenInput.addEventListener('blur', () => {
-            const promptOpen = document.getElementById('prompt-overlay');
-            if (promptOpen) return;
-            // Check immediately — don't wait for resize to mess things up
-            const currentH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            if (currentH > this.renderedViewportH + 50) {
-                this.enterReadingMode();
             }
         });
 
@@ -274,46 +264,52 @@ class WritingApp {
     }
 
     enterReadingMode() {
+        if (this._readingModeBlocked) return;
         this.isReadingMode = true;
         this.cursorEl.style.display = 'none';
         this.newSessionBtn.classList.remove('visible');
         clearTimeout(this.inactivityTimer);
-        // Hide fade overlay
         this.fadeOverlay.style.display = 'none';
-        // Remember scroll position from transform offset
+        // Save keyboard-open viewport height for smooth return
+        this.lastWritingViewportH = this.renderedViewportH;
         const scrollTop = -this.currentOffsetY;
-        // Switch text-world to static flow so native scroll works
+        // Snap viewport to full screen (keyboard is already gone)
+        this.updateViewportSize();
+        this.renderedViewportH = this.viewportH;
+        this.viewportVelocity = 0;
+        this.viewport.style.height = this.viewportH + 'px';
+        // Switch to native scroll
         this.textWorld.style.position = 'static';
         this.textWorld.style.transform = '';
-        // Add bottom padding so text doesn't sit at very bottom
         this.textWorld.style.paddingBottom = '40vh';
-        // Enable native scroll with iOS bounce
         this.viewport.style.overflowY = 'auto';
         this.viewport.style.webkitOverflowScrolling = 'touch';
-        // Set scroll to where user was writing
-        requestAnimationFrame(() => {
-            this.viewport.scrollTop = scrollTop;
-        });
-        // Expand viewport to full screen (keyboard is gone) via animation
-        this.updateViewportSize();
-        this.startAnimation();
+        this.viewport.style.touchAction = 'pan-y';
+        this.viewport.scrollTop = scrollTop;
     }
 
     enterWritingMode() {
+        if (!this.isReadingMode) return;
         this.isReadingMode = false;
+        this._readingModeBlocked = true;
+        setTimeout(() => { this._readingModeBlocked = false; }, 1500);
         this.cursorEl.style.display = '';
-        // Restore fade overlay
         this.fadeOverlay.style.display = '';
-        // Restore absolute positioning for transform-based writing mode
+        // Restore viewport to keyboard-open size for correct cursor positioning
+        if (this.lastWritingViewportH) {
+            this.renderedViewportH = this.lastWritingViewportH;
+            this.viewportVelocity = 0;
+            this.viewport.style.height = this.renderedViewportH + 'px';
+        }
         this.textWorld.style.position = 'absolute';
         this.textWorld.style.paddingBottom = '';
-        // Disable native scroll
         this.viewport.style.overflowY = 'hidden';
+        this.viewport.style.touchAction = 'none';
         this.viewport.scrollTop = 0;
-        // Refocus textarea (user gesture context)
+        // Focus synchronously for user gesture context (iOS keyboard)
         this.hiddenInput.focus({ preventScroll: true });
-        // Re-render to restore transform
         this.updateTransform();
+        this.startAnimation();
         this.resetInactivityTimer();
     }
 
@@ -601,25 +597,31 @@ class WritingApp {
         const vh = this.renderedViewportH;
 
         const anchor = document.getElementById('cursor-anchor');
-        if (!anchor) return;
+        if (!anchor) return true;
 
-        // offsetTop is already in visual coordinates (font is visual size)
         const cursorY = anchor.offsetTop;
         const targetY = vh * CONFIG.CURSOR_VERTICAL_POSITION;
-        const offsetY = targetY - cursorY;
-        const clampedOffsetY = Math.min(0, offsetY);
+        const targetOffsetY = Math.min(0, targetY - cursorY);
+
+        // Smooth scroll lerp
+        const diff = targetOffsetY - this.currentOffsetY;
+        if (Math.abs(diff) < 0.5) {
+            this.currentOffsetY = targetOffsetY;
+        } else {
+            this.currentOffsetY += diff * 0.15;
+        }
 
         let transform;
         if (this.isRTL) {
             const textWorldW = parseFloat(this.textWorld.style.width);
             const offsetX = this.viewportW - textWorldW;
-            transform = `translateX(${offsetX}px) translateY(${clampedOffsetY}px)`;
+            transform = `translateX(${offsetX}px) translateY(${this.currentOffsetY}px)`;
         } else {
-            transform = `translateY(${clampedOffsetY}px)`;
+            transform = `translateY(${this.currentOffsetY}px)`;
         }
 
         this.textWorld.style.transform = transform;
-        this.currentOffsetY = clampedOffsetY;
+        return Math.abs(diff) < 0.5;
     }
 
     // ── Zoom Animation ──
@@ -650,33 +652,36 @@ class WritingApp {
             const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
             if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
-            // Update visual font size each frame as scale lerps
+            // Update visual font size and cursor each frame as scale lerps
             this.applyVisualFontSize();
-            this.cursorEl.style.height = (this.lineH * this.currentScale) + 'px';
+            this.positionCursor();
 
-            // Viewport height lerp
-            const viewportDiff = this.viewportH - this.renderedViewportH;
-            const keyboardOpening = viewportDiff < 0;
-            if (keyboardOpening) {
-                this.renderedViewportH += viewportDiff * 0.12;
-                this.viewportVelocity = 0;
-            } else {
-                this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
-                this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
-                this.renderedViewportH += this.viewportVelocity;
-            }
-            const viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
-            if (viewportSettled) {
-                this.renderedViewportH = this.viewportH;
-                this.viewportVelocity = 0;
+            // Viewport height lerp — freeze during reading→writing transition
+            let viewportSettled = true;
+            if (!this._readingModeBlocked) {
+                const viewportDiff = this.viewportH - this.renderedViewportH;
+                const keyboardOpening = viewportDiff < 0;
+                if (keyboardOpening) {
+                    this.renderedViewportH += viewportDiff * 0.12;
+                    this.viewportVelocity = 0;
+                } else {
+                    this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
+                    this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
+                    this.renderedViewportH += this.viewportVelocity;
+                }
+                viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
+                if (viewportSettled) {
+                    this.renderedViewportH = this.viewportH;
+                    this.viewportVelocity = 0;
+                }
             }
             this.viewport.style.height = this.renderedViewportH + 'px';
 
             const stretchSettled = this.applyStretch();
-            this.updateTransform();
+            const scrollSettled = this.updateTransform();
             this.updateFade();
 
-            if (zoomSettled && stretchSettled && viewportSettled) {
+            if (zoomSettled && stretchSettled && viewportSettled && scrollSettled) {
                 this.animationId = null;
                 return;
             }
@@ -759,12 +764,28 @@ class WritingApp {
         const oldH = this.viewportH;
         this.updateViewportSize();
 
-        // Already in reading mode — ignore
-        if (this.isReadingMode) return;
+        if (this.isReadingMode) {
+            this.renderedViewportH = this.viewportH;
+            this.viewport.style.height = this.viewportH + 'px';
+            return;
+        }
 
-        // Detect keyboard close: height grew significantly, same width
-        const heightGrew = this.viewportH > oldH + 50;
         const sameWidth = this.viewportW === oldW;
+
+        // During reading→writing transition, snap viewport to track keyboard
+        if (this._readingModeBlocked) {
+            this.renderedViewportH = this.viewportH;
+            this.viewportVelocity = 0;
+            this.viewport.style.height = this.viewportH + 'px';
+            this.computeZoomScales();
+            this.zoomTargetScale = this.getScale();
+            this.updateTransform();
+            this.startAnimation();
+            return;
+        }
+
+        // Keyboard closing (height grew) → enter reading mode
+        const heightGrew = this.viewportH > oldH + 50;
         if (heightGrew && sameWidth) {
             this.enterReadingMode();
             return;
@@ -773,7 +794,6 @@ class WritingApp {
         this.computeZoomScales();
         this.zoomTargetScale = this.getScale();
 
-        // Width change (orientation, window resize) — need to reset layout
         if (this.viewportW !== oldW) {
             this.renderedViewportH = this.viewportH;
             this.currentScale = this.zoomTargetScale;
@@ -782,7 +802,6 @@ class WritingApp {
             this.updateLines();
             this.render();
         } else {
-            // Height-only change (keyboard open/close) — animate smoothly
             this.startAnimation();
         }
     }
