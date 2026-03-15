@@ -170,8 +170,10 @@ class WritingApp {
             if (e.key === 'Enter') this.handleEnter(e);
         });
 
-        // Click — desktop: focus in writing mode, exit reading mode
+        // Click — desktop only (touch devices use touchend)
+        let isTouchDevice = false;
         this.viewport.addEventListener('click', () => {
+            if (isTouchDevice) return;
             if (this.isReadingMode) {
                 this.enterWritingMode();
             } else {
@@ -179,9 +181,10 @@ class WritingApp {
             }
         });
 
-        // Touch handling: writing mode = focus, reading mode = tap to exit
+        // Touch handling
         let touchMoved = false;
         this.viewport.addEventListener('touchstart', (e) => {
+            isTouchDevice = true;
             touchMoved = false;
             if (!this.isReadingMode) {
                 e.preventDefault();
@@ -277,13 +280,20 @@ class WritingApp {
         clearTimeout(this.inactivityTimer);
         // Hide fade overlay
         this.fadeOverlay.style.display = 'none';
-        // Convert current translateY offset to scroll position
+        // Remember scroll position from transform offset
         const scrollTop = -this.currentOffsetY;
-        // Remove transform — let content flow naturally for native scroll
+        // Switch text-world to static flow so native scroll works
+        this.textWorld.style.position = 'static';
         this.textWorld.style.transform = '';
-        // Enable native scroll
+        // Add bottom padding so text doesn't sit at very bottom
+        this.textWorld.style.paddingBottom = '40vh';
+        // Enable native scroll with iOS bounce
         this.viewport.style.overflowY = 'auto';
-        this.viewport.scrollTop = scrollTop;
+        this.viewport.style.webkitOverflowScrolling = 'touch';
+        // Set scroll to where user was writing
+        requestAnimationFrame(() => {
+            this.viewport.scrollTop = scrollTop;
+        });
         // Expand viewport to full screen (keyboard is gone) via animation
         this.updateViewportSize();
         this.startAnimation();
@@ -294,7 +304,10 @@ class WritingApp {
         this.cursorEl.style.display = '';
         // Restore fade overlay
         this.fadeOverlay.style.display = '';
-        // Disable native scroll, restore transform-based positioning
+        // Restore absolute positioning for transform-based writing mode
+        this.textWorld.style.position = 'absolute';
+        this.textWorld.style.paddingBottom = '';
+        // Disable native scroll
         this.viewport.style.overflowY = 'hidden';
         this.viewport.scrollTop = 0;
         // Refocus textarea (user gesture context)
