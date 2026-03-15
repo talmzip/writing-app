@@ -1,10 +1,17 @@
 # Dev Log
 
-## 2026-03-15 — Prompt overlay, enter line behavior, stretch-zoom unification, cursor position
+## 2026-03-15 — Centered cursor start, responsive zoom, smooth keyboard transition
+- Cursor starts at vertical center (0.5) and interpolates to lower third (2/3) as writing progresses
+- Text-world pushed down via positive translateY so cursor sits mid-screen early on; as lines fill upward toward top edge, clamp kicks in and normal scrolling begins
+- Responsive ZOOM_END_CHARS: scales by viewport area ratio vs desktop reference (1920x1080), clamped to 0.4-1.0x. Smaller screens get larger max-zoom text
+- Smooth keyboard transitions: renderedViewportH lerps toward actual viewportH (factor 0.15). Height-only resizes (keyboard) animate; width changes (orientation) snap immediately
+- Replaced momentum-based zoom (velocity + decay, caused oscillation) with simple lerp (factor 0.08)
+- Stretch lerp slowed to 0.008 (~2-3s settle) for subtlety
+
+## 2026-03-15 — Prompt overlay, enter line behavior, stretch animation
 - Added "what's on your mind?" prompt overlay — italic, gray, centered. Tap anywhere to dismiss, focus textarea, show cursor. Solves mobile keyboard activation via user gesture.
 - Enter-created lines (hasNewline) no longer stretch to fill viewport — kept at 0 letter-spacing to visually mark intentional line breaks.
-- Removed separate stretch lerp animation. Spacing is now derived directly from current scale each frame — rides the zoom momentum, no visible separate animation.
-- Cursor vertical position interpolates from center (0.5) at start to lower third (2/3) at max zoom, using same ramp/easing as zoom.
+- Stretch uses per-line currentSpacing that lerps toward target (computed from currentScale each frame). Locked lines start at their active-line spacing and slowly expand.
 - Space-triggered line drop: fires when line has ≥ cpl-1 chars (unsqueezed capacity).
 - Removed `autofocus` attribute from hidden textarea.
 

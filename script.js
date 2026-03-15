@@ -25,6 +25,10 @@ const CONFIG = {
     ZOOM_MIN_DIFF: 0.0001,
     // Stretch lerp for locked lines
     STRETCH_LERP: 0.008,         // very slow — ~2-3s settle, peripheral vision only
+    // Viewport resize lerp (keyboard open/close)
+    VIEWPORT_LERP: 0.15,         // fast but smooth — ~300ms settle
+    // Responsive zoom: reference viewport area (desktop ~1920x1080)
+    ZOOM_REF_AREA: 1920 * 1080,
     // Line break mode: 'squeeze' (default), 'justified', or 'natural'
     LINE_BREAK_MODE: 'squeeze',
     // Squeeze: minimum char width ratio before safety-valve mid-word break
@@ -55,6 +59,7 @@ class WritingApp {
         this.lineH = 0;
         this.viewportW = 0;
         this.viewportH = 0;
+        this.renderedViewportH = 0; // lerps toward viewportH for smooth keyboard transitions
         this.scaleStart = 1;
         this.scaleEnd = 1;
 
@@ -78,6 +83,7 @@ class WritingApp {
     init() {
         this.measureFont();
         this.updateViewportSize();
+        this.renderedViewportH = this.viewportH; // start in sync
         this.computeZoomScales();
         this.currentScale = this.scaleStart;
         this.zoomTargetScale = this.scaleStart;
@@ -112,7 +118,10 @@ class WritingApp {
             this.viewportH = window.innerHeight;
         }
         this.viewport.style.width = this.viewportW + 'px';
-        this.viewport.style.height = this.viewportH + 'px';
+        // Height set via renderedViewportH (lerped) — only snap on init
+        if (this.renderedViewportH === 0) {
+            this.viewport.style.height = this.viewportH + 'px';
+        }
     }
 
     computeZoomScales() {
@@ -121,8 +130,12 @@ class WritingApp {
         const cw = this.charW;
         const lh = this.lineH;
 
+        // Scale ZOOM_END_CHARS by viewport area relative to desktop reference
+        const areaRatio = (vw * vh) / CONFIG.ZOOM_REF_AREA;
+        const endChars = Math.round(CONFIG.ZOOM_END_CHARS * Math.max(0.4, Math.min(1.0, areaRatio)));
+
         this.scaleStart = Math.min(1.0, Math.sqrt((vw * vh) / (CONFIG.ZOOM_START_CHARS * cw * lh)));
-        this.scaleEnd = Math.min(1.0, Math.sqrt((vw * vh) / (CONFIG.ZOOM_END_CHARS * cw * lh)));
+        this.scaleEnd = Math.min(1.0, Math.sqrt((vw * vh) / (endChars * cw * lh)));
     }
 
     getCharsPerLine(scale) {
@@ -451,22 +464,30 @@ class WritingApp {
     }
 
     getCursorVerticalPosition() {
-        const t = Math.min(this.text.length / CONFIG.ZOOM_RAMP_CHARS, 1.0);
+        // Estimate how many lines fit from top to center at current scale
+        const linesFromTopToCenter = Math.max(1, Math.floor(
+            (this.renderedViewportH * CONFIG.CURSOR_START_POSITION) / (this.lineH * this.currentScale)
+        ));
+        const t = Math.min(this.lockedLines.length / linesFromTopToCenter, 1.0);
         const eased = 1 - Math.pow(1 - t, 2);
         return CONFIG.CURSOR_START_POSITION + (CONFIG.CURSOR_END_POSITION - CONFIG.CURSOR_START_POSITION) * eased;
     }
 
     updateTransform() {
         const scale = this.currentScale;
+        const vh = this.renderedViewportH;
 
         const anchor = document.getElementById('cursor-anchor');
         if (!anchor) return;
 
         const cursorY = anchor.offsetTop;
         const cursorViewportY = cursorY * scale;
-        const targetY = this.viewportH * this.getCursorVerticalPosition();
+        const targetY = vh * this.getCursorVerticalPosition();
         const offsetY = targetY - cursorViewportY;
-        const clampedOffsetY = Math.min(0, offsetY);
+        // Allow positive offsetY (text pushed down so cursor sits mid-screen)
+        // but don't push text-world top below screen top (offsetY <= targetY is always true)
+        // and don't let content scroll past top when there's lots of text
+        const clampedOffsetY = Math.min(offsetY, targetY);
 
         let transform;
         if (this.isRTL) {
@@ -491,11 +512,20 @@ class WritingApp {
             const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
             if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
+            // Viewport height: lerp for smooth keyboard transitions
+            this.renderedViewportH += (this.viewportH - this.renderedViewportH) * CONFIG.VIEWPORT_LERP;
+            const viewportSettled = Math.abs(this.renderedViewportH - this.viewportH) < 1;
+            if (viewportSettled) {
+                this.renderedViewportH = this.viewportH;
+            } else {
+                this.viewport.style.height = this.renderedViewportH + 'px';
+            }
+
             const stretchSettled = this.applyStretch();
             this.updateTransform();
             this.updateFade();
 
-            if (zoomSettled && stretchSettled) {
+            if (zoomSettled && stretchSettled && viewportSettled) {
                 this.animationId = null;
                 return;
             }
@@ -571,15 +601,23 @@ class WritingApp {
     }
 
     handleResize() {
+        const oldW = this.viewportW;
         this.updateViewportSize();
         this.computeZoomScales();
-        this.currentScale = this.getScale();
-        this.zoomTargetScale = this.currentScale;
-        this.setupTextWorld();
-        // Reset lines — charsPerLine changed with viewport
-        this.lockedLines = [];
-        this.updateLines();
-        this.render();
+        this.zoomTargetScale = this.getScale();
+
+        // Width change (orientation, window resize) — need to reset layout
+        if (this.viewportW !== oldW) {
+            this.renderedViewportH = this.viewportH;
+            this.currentScale = this.zoomTargetScale;
+            this.setupTextWorld();
+            this.lockedLines = [];
+            this.updateLines();
+            this.render();
+        } else {
+            // Height-only change (keyboard open/close) — animate smoothly
+            this.startAnimation();
+        }
     }
 
     // ── Session Persistence ──
