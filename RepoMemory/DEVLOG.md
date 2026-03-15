@@ -1,5 +1,16 @@
 # Dev Log
 
+## 2026-03-15 — Reading/writing mode transitions fixed, design doc + implementation plan
+
+- Fixed reading→writing mode re-entry bug (handleResize checked _readingModeBlocked after heightGrew — reordered)
+- Fixed tap detection on mobile (distance < 15px + time < 300ms thresholds)
+- Fixed scroll stuck at top (overscroll bounce triggering false taps)
+- Fixed viewport height snapping (removed forced snaps, let animation loop converge naturally)
+- Moved `touch-action: none` from global `html, body` to `#viewport` only, toggled per mode
+- Increased ZOOM_LERP to 0.13, scroll lerp to 0.22 for more visible smooth animations
+- Rewrote `WritingAppDesign.md` — added Highlights, Zen Mode, Type-to-Navigate, updated Gap, Core Principles, Architecture
+- Created `ImplementationPlan.md` — 6-phase plan, module structure, architecture review, cross-platform strategy, non-developer explanation
+
 ## 2026-03-15 — Rendering engine refactor: removed CSS scale()
 - Replaced CSS `transform: scale()` with actual visual font size rendering
 - Text now rendered at `BASE_FONT_SIZE * currentScale` — browser sees real dimensions

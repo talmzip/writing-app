@@ -69,32 +69,129 @@ When the user folds the keyboard (or the textarea loses focus), the app enters *
 
 The visual transition must be smooth — text expanding from half-screen to full-screen. **The per-line stretch values and visual character of the text must be preserved.** Reading mode is not a reformat — it's the same beautiful text, just shown in a larger viewport.
 
-> **Current status:** Reading mode is fundamentally broken. CSS `transform: scale()` doesn't affect layout, so native scroll doesn't know the visual content size. The planned fix is to remove CSS transform scaling entirely and render at actual visual sizes (computed font-size + proportional letter-spacing). This is a rendering engine refactor.
+> **Current status:** Implemented. The rendering engine uses actual font-size rendering (not CSS scale). Reading mode switches to native browser scroll. Transition robustness on mobile is an ongoing area of polish — see Implementation Plan for architectural notes.
 
-## New Session
+## Highlights
 
-A "New" button appears in the gap between the cursor and the bottom of the screen after 2.5 seconds of inactivity. It fades in gently (0.6s ease-in). Tapping it saves the current session and starts fresh.
+### The Gesture
 
-Every session starts blank. Always. The blank page is the ritual.
+The gap between the cursor and the bottom of the screen is an interaction zone. Swipe UP from the gap to highlight recently written text. The swipe velocity controls how much text is selected:
 
-## Sessions
+- **Slow swipe** — highlights a few words
+- **Fast swipe** — highlights a larger chunk
+- **Swipe again** — continues highlighting further back into the text
 
-Sessions autosave to localStorage every 5 seconds. Only sessions with 3+ words are saved. A minimal viewer shows past sessions with date, preview, word count, and duration. You can read or delete old sessions.
+The gesture should feel physical — like dragging a highlighter pen backward through your own words.
 
-The sessions viewer is a separate screen, not an overlay on the writing canvas. Access point is deliberately subtle — it shouldn't distract from writing.
+### Visual Treatment
 
-## Future: The Gap
+Highlighted text gets a colored background — subtle but clear. The highlight color should feel warm and analog, not digital-sterile. Think soft yellow or peach.
 
-The space between the cursor and the bottom of the screen is prime real estate. Currently it holds the "New" button during inactivity. The vision is bigger:
+> Future possibility: brush-stroke texture instead of flat color. The highlight could look hand-drawn, matching the app's analog writing feel.
 
-**The gap becomes a reactive UI zone.** It responds to writing behavior — speed, fluidity, pauses, rhythm. Imagine:
+### Persistence
+
+Highlights are saved to localStorage, tied to the session they came from. Each highlight stores the text range and the session reference.
+
+### Un-highlight
+
+In the highlights viewer, you can un-highlight text — removing the mark and returning it to normal session text. The un-highlight gesture should feel as satisfying as the highlight gesture.
+
+### Status: Designed
+
+## Zen Mode
+
+Tap a highlight (in the highlights viewer) to enter **Zen Mode**. Everything else fades away. The highlighted text is the only thing on screen.
+
+### The Transition In
+
+The surrounding text dissolves. The highlighted words lift from their context — individual letters animate toward the center of the screen. They settle into a clean, centered layout. The animation should feel like the words are breathing free from the page.
+
+### The Experience
+
+Just the highlighted words, centered on a blank screen. Large, intimate, present. The same feeling as the first words of a new session — close and personal.
+
+### The Transition Out
+
+Tap to exit. The letters animate back to their original positions in the text. The surrounding context fades back in. The writer returns to where they were.
+
+### Animation Philosophy
+
+Zen Mode establishes a pattern that runs through the entire app: **text is alive.** Letters are not static glyphs locked in place — they can move, breathe, rearrange, dance. Every feature should treat text as a physical material that can be manipulated with smooth, organic animations.
+
+This philosophy extends to future features: any time text needs to change state, appear, disappear, reorganize, or respond to interaction — it should do so with character-level animation that feels tactile and satisfying.
+
+### Status: Designed
+
+## Type-to-Navigate
+
+At the start of a fresh session, certain words act as navigation triggers:
+
+- Type **"past"** — the word smoothly transitions to bold. It becomes tappable. Tap it to open the past sessions viewer.
+- Type **"highlight"** — same behavior, opens the highlights viewer.
+
+### Behavior
+
+- Only triggers on a **fresh session** (no prior text in the current session).
+- The bold transition is animated — the weight increases smoothly over ~300ms.
+- If the user keeps typing past the trigger word (e.g., "past experiences"), the word reverts to normal text and becomes part of the session.
+- The trigger detection is case-insensitive.
+
+### Why
+
+The app has no visible UI chrome — no hamburger menus, no navigation bars. Everything is accessed through the writing surface itself. Typing a word to navigate is consistent with the app's philosophy: the act of writing IS the interface.
+
+### Status: Designed
+
+## The Gap
+
+The space between the cursor and the bottom of the screen is prime real estate. It serves multiple purposes, activated by context:
+
+### Highlight Swipe Zone
+When the user swipes up from the gap, it triggers text highlighting (see Highlights section). This is the primary interaction.
+
+### New Session Button
+After 2.5 seconds of inactivity, a "New" button fades in. Tapping it saves the current session and starts fresh.
+
+### Ambient Reactive Zone
+When no interaction is happening, the gap can host ambient visuals that respond to writing behavior — speed, fluidity, pauses, rhythm. Imagine:
 
 - Subtle visual feedback that reflects your writing state
 - Generative visuals or shaders that pulse with your rhythm
 - Data-driven elements that respond to writing patterns
 - A space that feels alive while you write, without demanding attention
 
+The ambient visuals yield to the highlight swipe — when the user touches the gap, the ambient state fades and the interaction takes priority. When the interaction ends, the ambient state gently returns.
+
 This requires **writing behavior tracking**: typing speed, pause duration, burst patterns, session flow. The tracking infrastructure is a prerequisite. The gap UI is the creative application layer on top.
+
+### Status: New Session button — Implemented. Highlight swipe — Designed. Ambient visuals — Concept.
+
+## Sessions & Highlights Viewer
+
+The viewer is a separate screen from the writing canvas. It has two tabs (or a toggle):
+
+### Past Sessions
+Sessions autosave to localStorage every 5 seconds. Only sessions with 3+ words are saved. Shows date, preview, word count, and duration. You can read or delete old sessions.
+
+### Highlights
+A scrollable collection of all highlights across sessions. Each highlight shows the text, the session it came from, and the date. You can:
+
+- Tap a highlight to enter Zen Mode
+- Un-highlight (remove the mark, text stays in the session)
+
+The UI is minimal and consistent with the rest of the app — monospace, lots of whitespace, no visual noise.
+
+### Access
+The viewer is accessed by typing trigger words at session start (see Type-to-Navigate). The access point is deliberately invisible — it shouldn't distract from writing. Power users discover it naturally.
+
+### Status: Past Sessions — Implemented. Highlights tab — Designed. Trigger word access — Designed.
+
+## New Session
+
+A "New" button appears in the gap between the cursor and the bottom of the screen after 2.5 seconds of inactivity. It fades in gently (0.6s ease-in). Tapping it saves the current session and starts fresh.
+
+Every session starts blank. Always. The blank page is the ritual.
 
 ## Core Principles
 
@@ -103,22 +200,37 @@ This requires **writing behavior tracking**: typing speed, pause duration, burst
 - **Smoothness.** Every transition is gradual and eased. Jarring changes break the meditative state.
 - **Simplicity.** No UI to manage. No settings. Open and write.
 - **Words fill the space.** Text is never small and lonely in a corner. Words always belong to the whole screen.
+- **Text is alive.** Letters are physical material — they move, stretch, breathe, dance. Every state change is animated at the character level.
+- **Everything is satisfying.** Every gesture, every transition, every interaction should feel tactile and rewarding. The app is a pleasure to use, not just a tool.
 
 ## Technical Stack
 
-- Vanilla HTML/CSS/JS. No framework at current scope.
+- Vanilla HTML/CSS/JS with ES modules. No framework at current scope.
 - GitHub Pages — free, zero config, deploys from repo.
 - No backend, no accounts, no server.
-- Three files: `index.html`, `styles.css`, `script.js`.
+- Module-based file structure under `src/` (see Implementation Plan).
 
 ## Architecture
 
 - **Input:** Hidden `<textarea>` captures all input (mobile + desktop). `input` event for text, `keydown` for Enter.
-- **Rendering:** Text in `#text-display` as locked `<div class="line">` elements. Line breaking computed in JS.
-- **Zoom:** Continuous CSS `transform: scale()` on `#text-world`. Base font 48px, scale interpolated with ease-out curve. *(Planned: replace with actual font-size rendering.)*
+- **Rendering:** Text in `#text-display` as locked `<div class="line">` elements. Line breaking computed in JS. Font rendered at actual visual size (`BASE_FONT_SIZE * scale`).
+- **Zoom:** Continuous font-size interpolation with ease-out curve. Lerped each animation frame.
 - **Stretch:** Per-line `letter-spacing` with slow lerp animation. Active line = 0 spacing. Locked lines stretch toward target computed from current scale each frame.
-- **Cursor:** Positioned via zero-width anchor `<span>`. Cursor div inside text-world, scales with transform.
-- **Scroll:** `translateY` keeps cursor at target vertical position. Clamped for short content.
-- **Fade:** CSS gradient overlay, height tied to line height × scale. Appears when content scrolls off top.
-- **Sessions:** `localStorage` autosave. Minimal viewer with list → detail → delete flow.
+- **Cursor:** Positioned via zero-width anchor `<span>`. Cursor div inside text-world.
+- **Scroll:** Writing mode uses `translateY` to keep cursor at target vertical position. Reading mode uses native browser scroll.
+- **Fade:** CSS gradient overlay, height tied to line height x scale. Appears when content scrolls off top.
+- **Gestures:** Centralized gesture recognizer handles tap, swipe, and scroll detection. Works with the browser's native touch handling, not against it.
+- **Animation:** Central `requestAnimationFrame` loop drives all lerps (zoom, stretch, scroll, viewport). Separate animation utilities for letter-level effects (Zen Mode, transitions).
+- **Sessions:** `localStorage` autosave. Viewer with past sessions + highlights tabs.
+- **Highlights:** Stored in `localStorage` with session references. Created via gap-swipe gesture.
 - **RTL:** Auto-detected from Hebrew Unicode range. Flips direction and transform-origin.
+
+---
+
+## Changelog
+
+- **2026-03-15** — Added: Highlights (gap-swipe, visual treatment, persistence, un-highlight). Added: Zen Mode (letter animation, isolated view). Added: Type-to-Navigate (trigger words at session start). Added: Text Animation Philosophy ("text is alive"). Updated: Gap section (highlight swipe + ambient visuals coexist). Updated: Sessions viewer (highlights tab). Updated: Architecture (gesture recognizer, animation system, modules). Updated: Core Principles (text is alive, everything is satisfying). Updated: Technical Stack (ES modules). Updated: Reading Mode status (implemented, not broken).
+- **2026-03-14** — Added: Squeeze line-break mode (negative letter-spacing compression). Updated line locking details.
+- **2026-03-14** — Added: Line Locking & Stretch mechanism. Added: Two line-break modes.
+- **2026-03-13** — Added: Momentum-based animations. Reading mode concept.
+- **2026-03-11** — Initial design document. Core writing experience, zoom, sessions.

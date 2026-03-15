@@ -20,7 +20,7 @@ const CONFIG = {
     FADE_DECAY: 0.92,
     FADE_MIN_VELOCITY: 0.3,
     // Smooth zoom
-    ZOOM_LERP: 0.08,             // simple lerp — no momentum, no oscillation
+    ZOOM_LERP: 0.13,             // simple lerp — no momentum, no oscillation
     ZOOM_MIN_DIFF: 0.0001,
     // Stretch lerp for locked lines
     STRETCH_LERP: 0.008,         // very slow — ~2-3s settle, peripheral vision only
@@ -184,9 +184,11 @@ class WritingApp {
 
         // Touch handling
         let touchStartY = 0;
+        let touchStartTime = 0;
         this.viewport.addEventListener('touchstart', (e) => {
             isTouchDevice = true;
             touchStartY = e.touches[0].clientY;
+            touchStartTime = Date.now();
             if (!this.isReadingMode) {
                 e.preventDefault();
                 this.focusInput();
@@ -194,9 +196,10 @@ class WritingApp {
         }, { passive: false });
         this.viewport.addEventListener('touchend', (e) => {
             if (!this.isReadingMode) return;
-            // Only enter writing mode on a tap (not a scroll)
             const touchEndY = e.changedTouches[0].clientY;
-            if (Math.abs(touchEndY - touchStartY) < 10) {
+            const elapsed = Date.now() - touchStartTime;
+            // Must be a quick tap (< 300ms) AND barely moved (< 15px)
+            if (elapsed < 300 && Math.abs(touchEndY - touchStartY) < 15) {
                 e.preventDefault();
                 this.enterWritingMode();
             }
@@ -270,14 +273,10 @@ class WritingApp {
         this.newSessionBtn.classList.remove('visible');
         clearTimeout(this.inactivityTimer);
         this.fadeOverlay.style.display = 'none';
-        // Save keyboard-open viewport height for smooth return
         this.lastWritingViewportH = this.renderedViewportH;
         const scrollTop = -this.currentOffsetY;
-        // Snap viewport to full screen (keyboard is already gone)
+        // Update target viewport size (keyboard is already gone)
         this.updateViewportSize();
-        this.renderedViewportH = this.viewportH;
-        this.viewportVelocity = 0;
-        this.viewport.style.height = this.viewportH + 'px';
         // Switch to native scroll
         this.textWorld.style.position = 'static';
         this.textWorld.style.transform = '';
@@ -286,6 +285,8 @@ class WritingApp {
         this.viewport.style.webkitOverflowScrolling = 'touch';
         this.viewport.style.touchAction = 'pan-y';
         this.viewport.scrollTop = scrollTop;
+        // Animate viewport expansion from keyboard-open to full screen
+        this.startAnimation();
     }
 
     enterWritingMode() {
@@ -295,12 +296,8 @@ class WritingApp {
         setTimeout(() => { this._readingModeBlocked = false; }, 1500);
         this.cursorEl.style.display = '';
         this.fadeOverlay.style.display = '';
-        // Restore viewport to keyboard-open size for correct cursor positioning
-        if (this.lastWritingViewportH) {
-            this.renderedViewportH = this.lastWritingViewportH;
-            this.viewportVelocity = 0;
-            this.viewport.style.height = this.renderedViewportH + 'px';
-        }
+        // Keep renderedViewportH at current (full-screen) value — keyboard animation
+        // will smoothly shrink it via handleResize + animation tick
         this.textWorld.style.position = 'absolute';
         this.textWorld.style.paddingBottom = '';
         this.viewport.style.overflowY = 'hidden';
@@ -608,7 +605,7 @@ class WritingApp {
         if (Math.abs(diff) < 0.5) {
             this.currentOffsetY = targetOffsetY;
         } else {
-            this.currentOffsetY += diff * 0.15;
+            this.currentOffsetY += diff * 0.22;
         }
 
         let transform;
@@ -656,24 +653,21 @@ class WritingApp {
             this.applyVisualFontSize();
             this.positionCursor();
 
-            // Viewport height lerp — freeze during reading→writing transition
-            let viewportSettled = true;
-            if (!this._readingModeBlocked) {
-                const viewportDiff = this.viewportH - this.renderedViewportH;
-                const keyboardOpening = viewportDiff < 0;
-                if (keyboardOpening) {
-                    this.renderedViewportH += viewportDiff * 0.12;
-                    this.viewportVelocity = 0;
-                } else {
-                    this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
-                    this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
-                    this.renderedViewportH += this.viewportVelocity;
-                }
-                viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
-                if (viewportSettled) {
-                    this.renderedViewportH = this.viewportH;
-                    this.viewportVelocity = 0;
-                }
+            // Viewport height lerp
+            const viewportDiff = this.viewportH - this.renderedViewportH;
+            const keyboardOpening = viewportDiff < 0;
+            if (keyboardOpening) {
+                this.renderedViewportH += viewportDiff * 0.12;
+                this.viewportVelocity = 0;
+            } else {
+                this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
+                this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
+                this.renderedViewportH += this.viewportVelocity;
+            }
+            const viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
+            if (viewportSettled) {
+                this.renderedViewportH = this.viewportH;
+                this.viewportVelocity = 0;
             }
             this.viewport.style.height = this.renderedViewportH + 'px';
 
@@ -772,14 +766,10 @@ class WritingApp {
 
         const sameWidth = this.viewportW === oldW;
 
-        // During reading→writing transition, snap viewport to track keyboard
+        // During reading→writing transition, let animation track keyboard smoothly
         if (this._readingModeBlocked) {
-            this.renderedViewportH = this.viewportH;
-            this.viewportVelocity = 0;
-            this.viewport.style.height = this.viewportH + 'px';
             this.computeZoomScales();
             this.zoomTargetScale = this.getScale();
-            this.updateTransform();
             this.startAnimation();
             return;
         }

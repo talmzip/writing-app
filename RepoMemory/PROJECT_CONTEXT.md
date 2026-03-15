@@ -24,7 +24,9 @@ A minimalist, distraction-free writing app for Morning Pages / stream-of-conscio
 - `WritingAppDesign.md` — design vision
 
 ## Known issues / next steps
-- Reading mode transition needs mobile testing (iOS Safari, Chrome Android)
 - RTL with letter-spacing stretch untested
-- Sessions toggle button hidden (awaiting redesign)
-- Future: writing behavior tracking, gap UI with reactive visuals
+- Sessions toggle button hidden (will be replaced by type-to-navigate)
+- Next: module split (Phase 1 of ImplementationPlan.md), then gesture recognizer + mode state machine (Phase 2)
+- Planned features: Highlights (gap-swipe), Type-to-Navigate, Zen Mode, gap ambient visuals
+- See `ImplementationPlan.md` for full 6-phase plan and architecture recommendations
+- See `WritingAppDesign.md` for design vision and feature specs
