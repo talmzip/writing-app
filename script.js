@@ -172,12 +172,10 @@ class WritingApp {
             if (e.key === 'Enter') this.handleEnter(e);
         });
 
-        // Tap to resume writing from reading mode, or refocus in writing mode
+        // Click — desktop only (touch uses touchend instead)
         let touchMoved = false;
         this.viewport.addEventListener('click', () => {
-            if (this.isReadingMode && !touchMoved) {
-                this.enterWritingMode();
-            } else if (!this.isReadingMode) {
+            if (!this.isReadingMode) {
                 this.focusInput();
             }
         });
@@ -215,6 +213,9 @@ class WritingApp {
             if (touchMoved) {
                 e.preventDefault();
                 this.startReadingMomentum();
+            } else {
+                // Tap (no drag) — return to writing mode
+                this.enterWritingMode();
             }
         });
 
@@ -800,8 +801,8 @@ class WritingApp {
         const oldW = this.viewportW;
         this.updateViewportSize();
 
-        // In reading mode, ignore resize (scale/spacing frozen)
-        if (this.isReadingMode) return;
+        // Skip recalculation if in reading mode OR if input lost focus (keyboard closing)
+        if (this.isReadingMode || document.activeElement !== this.hiddenInput) return;
 
         this.computeZoomScales();
         this.zoomTargetScale = this.getScale();
