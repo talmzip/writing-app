@@ -9,8 +9,7 @@ const CONFIG = {
     ZOOM_RAMP_CHARS: 360,     // ~60 words written = fully zoomed out
     AVG_CHARS_PER_WORD: 6,
     BASE_FONT_SIZE: 48,
-    CURSOR_START_POSITION: 0.5,    // center of screen at start
-    CURSOR_END_POSITION: 2 / 3,    // lower third when fully zoomed out
+    CURSOR_VERTICAL_POSITION: 2 / 3,
     FADE_LINE_FRACTION: 0.5,
     FONT_FAMILY: "'Courier New', monospace",
     LINE_HEIGHT: 1.4,
@@ -463,16 +462,6 @@ class WritingApp {
         this.cursorEl.style.height = this.lineH + 'px';
     }
 
-    getCursorVerticalPosition() {
-        // Estimate how many lines fit from top to center at current scale
-        const linesFromTopToCenter = Math.max(1, Math.floor(
-            (this.renderedViewportH * CONFIG.CURSOR_START_POSITION) / (this.lineH * this.currentScale)
-        ));
-        const t = Math.min(this.lockedLines.length / linesFromTopToCenter, 1.0);
-        const eased = 1 - Math.pow(1 - t, 2);
-        return CONFIG.CURSOR_START_POSITION + (CONFIG.CURSOR_END_POSITION - CONFIG.CURSOR_START_POSITION) * eased;
-    }
-
     updateTransform() {
         const scale = this.currentScale;
         const vh = this.renderedViewportH;
@@ -482,12 +471,9 @@ class WritingApp {
 
         const cursorY = anchor.offsetTop;
         const cursorViewportY = cursorY * scale;
-        const targetY = vh * this.getCursorVerticalPosition();
+        const targetY = vh * CONFIG.CURSOR_VERTICAL_POSITION;
         const offsetY = targetY - cursorViewportY;
-        // Allow positive offsetY (text pushed down so cursor sits mid-screen)
-        // but don't push text-world top below screen top (offsetY <= targetY is always true)
-        // and don't let content scroll past top when there's lots of text
-        const clampedOffsetY = Math.min(offsetY, targetY);
+        const clampedOffsetY = Math.min(0, offsetY);
 
         let transform;
         if (this.isRTL) {
@@ -537,7 +523,9 @@ class WritingApp {
     applyStretch() {
         const scale = this.currentScale;
         const targetWidth = (this.viewportW / scale) - 40;
-        const lerpFactor = CONFIG.STRETCH_LERP;
+        // Fast lerp during keyboard animation, slow lerp during normal writing
+        const viewportAnimating = Math.abs(this.renderedViewportH - this.viewportH) > 1;
+        const lerpFactor = viewportAnimating ? CONFIG.VIEWPORT_LERP : CONFIG.STRETCH_LERP;
         let allSettled = true;
 
         const children = this.textDisplay.children;
