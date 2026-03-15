@@ -9,7 +9,8 @@ const CONFIG = {
     ZOOM_RAMP_CHARS: 360,     // ~60 words written = fully zoomed out
     AVG_CHARS_PER_WORD: 6,
     BASE_FONT_SIZE: 48,
-    CURSOR_VERTICAL_POSITION: 2 / 3,
+    CURSOR_START_POSITION: 0.5,    // center of screen at start
+    CURSOR_END_POSITION: 2 / 3,    // lower third when fully zoomed out
     FADE_LINE_FRACTION: 0.5,
     FONT_FAMILY: "'Courier New', monospace",
     LINE_HEIGHT: 1.4,
@@ -19,10 +20,11 @@ const CONFIG = {
     FADE_ACCELERATION: 0.15,
     FADE_DECAY: 0.92,
     FADE_MIN_VELOCITY: 0.3,
-    // Smooth zoom+stretch momentum
-    ZOOM_ACCELERATION: 0.015,
-    ZOOM_DECAY: 0.98,
-    ZOOM_MIN_VELOCITY: 0.000002,
+    // Smooth zoom
+    ZOOM_LERP: 0.08,             // simple lerp — no momentum, no oscillation
+    ZOOM_MIN_DIFF: 0.0001,
+    // Stretch lerp for locked lines
+    STRETCH_LERP: 0.008,         // very slow — ~2-3s settle, peripheral vision only
     // Line break mode: 'squeeze' (default), 'justified', or 'natural'
     LINE_BREAK_MODE: 'squeeze',
     // Squeeze: minimum char width ratio before safety-valve mid-word break
@@ -66,8 +68,7 @@ class WritingApp {
         this.fadeTargetHeight = 0;
         this.fadeAnimationId = null;
 
-        // Smooth zoom momentum
-        this.zoomVelocity = 0;
+        // Smooth zoom lerp
         this.zoomTargetScale = 1;
         this.animationId = null;
 
@@ -83,7 +84,7 @@ class WritingApp {
         this.setupTextWorld();
         this.setupEventListeners();
         this.render();
-        this.setupTapToBegin();
+        this.setupPromptOverlay();
         this.startAutosave();
     }
 
@@ -152,10 +153,12 @@ class WritingApp {
             this.focusInput();
         });
 
-        // Refocus on blur, but not if sessions screen is open
+        // Refocus on blur, but not if sessions screen or prompt overlay is showing
         this.hiddenInput.addEventListener('blur', () => {
             setTimeout(() => {
-                if (document.getElementById('sessions-screen').classList.contains('hidden')) {
+                const sessionsOpen = !document.getElementById('sessions-screen').classList.contains('hidden');
+                const promptOpen = document.getElementById('prompt-overlay');
+                if (!sessionsOpen && !promptOpen) {
                     this.focusInput();
                 }
             }, 50);
@@ -191,26 +194,22 @@ class WritingApp {
         });
     }
 
-    setupTapToBegin() {
-        const overlay = document.getElementById('tap-to-begin');
+    setupPromptOverlay() {
+        const overlay = document.getElementById('prompt-overlay');
         if (!overlay) {
             this.focusInput();
             return;
         }
-        // On desktop, try focusing immediately — if it works, skip overlay
-        this.hiddenInput.focus({ preventScroll: true });
-        // Short delay to check if focus actually took (keyboard opened)
-        setTimeout(() => {
-            if (document.activeElement === this.hiddenInput) {
-                overlay.classList.add('hidden');
-            }
-        }, 300);
-        // Tap/click handler satisfies user-activation requirement for mobile
+        // Hide cursor until activated
+        this.cursorEl.style.display = 'none';
+        // Tap/click anywhere — focus textarea (satisfies mobile user-activation), show cursor, fade out prompt
         const activate = (e) => {
             e.preventDefault();
             this.hiddenInput.focus({ preventScroll: true });
+            this.cursorEl.style.display = '';
             overlay.classList.add('hidden');
-            this.isActivated = true;
+            // Remove from DOM after fade
+            setTimeout(() => overlay.remove(), 300);
         };
         overlay.addEventListener('click', activate);
         overlay.addEventListener('touchend', activate);
@@ -292,10 +291,15 @@ class WritingApp {
         }
     }
 
+    makeLine(text, birthScale, hasNewline, hasDropSpace) {
+        // Start at whatever the active line's spacing was (0 or squeeze)
+        const currentSpacing = this.getActiveLineSpacing(birthScale);
+        return { text, birthScale, hasNewline, hasDropSpace, currentSpacing };
+    }
+
     processRemainingSqueeze(remaining, cpl, birthScale) {
         const refWidth = (this.viewportW / birthScale) - 40;
         const maxChars = Math.floor(refWidth / (this.charW * CONFIG.SQUEEZE_MIN_RATIO));
-        const activeSpacing = this.getActiveLineSpacing(birthScale);
         let lineStart = 0;
 
         for (let i = 0; i < remaining.length; i++) {
@@ -303,27 +307,19 @@ class WritingApp {
             const lineLen = i - lineStart + 1;
 
             if (ch === '\n') {
-                this.lockedLines.push({
-                    text: remaining.slice(lineStart, i),
-                    birthScale,
-                    hasNewline: true,
-                    hasDropSpace: false,
-                    currentSpacing: activeSpacing,
-                });
+                this.lockedLines.push(this.makeLine(
+                    remaining.slice(lineStart, i), birthScale, true, false
+                ));
                 lineStart = i + 1;
                 continue;
             }
 
             if (ch === ' ') {
-                const textLen = i - lineStart; // chars on this line before the space
+                const textLen = i - lineStart;
                 if (textLen >= cpl - 1) {
-                    this.lockedLines.push({
-                        text: remaining.slice(lineStart, i),
-                        birthScale,
-                        hasNewline: false,
-                        hasDropSpace: true,
-                        currentSpacing: activeSpacing,
-                    });
+                    this.lockedLines.push(this.makeLine(
+                        remaining.slice(lineStart, i), birthScale, false, true
+                    ));
                     lineStart = i + 1;
                     continue;
                 }
@@ -331,13 +327,9 @@ class WritingApp {
 
             // Safety valve: force mid-word break at max squeeze
             if (lineLen > maxChars) {
-                this.lockedLines.push({
-                    text: remaining.slice(lineStart, i),
-                    birthScale,
-                    hasNewline: false,
-                    hasDropSpace: false,
-                    currentSpacing: activeSpacing,
-                });
+                this.lockedLines.push(this.makeLine(
+                    remaining.slice(lineStart, i), birthScale, false, false
+                ));
                 lineStart = i;
             }
         }
@@ -351,26 +343,18 @@ class WritingApp {
         for (let p = 0; p < paragraphs.length - 1; p++) {
             const lines = this.wrapParagraph(paragraphs[p], cpl);
             for (let i = 0; i < lines.length; i++) {
-                this.lockedLines.push({
-                    text: lines[i],
-                    birthScale,
-                    hasNewline: i === lines.length - 1,
-                    hasDropSpace: false,
-                    currentSpacing: 0,
-                });
+                this.lockedLines.push(this.makeLine(
+                    lines[i], birthScale, i === lines.length - 1, false
+                ));
             }
         }
 
         const lastPara = paragraphs[paragraphs.length - 1];
         const lastLines = this.wrapParagraph(lastPara, cpl);
         for (let i = 0; i < lastLines.length - 1; i++) {
-            this.lockedLines.push({
-                text: lastLines[i],
-                birthScale,
-                hasNewline: false,
-                hasDropSpace: false,
-                currentSpacing: 0,
-            });
+            this.lockedLines.push(this.makeLine(
+                lastLines[i], birthScale, false, false
+            ));
         }
         this.activeLine = lastLines[lastLines.length - 1] || '';
     }
@@ -425,8 +409,7 @@ class WritingApp {
         this.fullRender();
         this.positionCursor();
 
-        // Kick zoom animation (stretch is derived from scale per line)
-        this.zoomVelocity += (this.zoomTargetScale - this.currentScale) * CONFIG.ZOOM_ACCELERATION;
+        // Always start animation — handles both zoom lerp and stretch lerp
         this.startAnimation();
         this.updateFade();
     }
@@ -434,8 +417,7 @@ class WritingApp {
     fullRender() {
         let html = '';
         for (const line of this.lockedLines) {
-            const spacing = line.currentSpacing != null ? line.currentSpacing : 0;
-            html += `<div class="line" style="letter-spacing:${spacing}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
+            html += `<div class="line" style="letter-spacing:${line.currentSpacing}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
         }
         const activeLS = this.getActiveLineSpacing(this.currentScale);
         html += `<div class="line active" style="letter-spacing:${activeLS}px">` + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
@@ -468,6 +450,12 @@ class WritingApp {
         this.cursorEl.style.height = this.lineH + 'px';
     }
 
+    getCursorVerticalPosition() {
+        const t = Math.min(this.text.length / CONFIG.ZOOM_RAMP_CHARS, 1.0);
+        const eased = 1 - Math.pow(1 - t, 2);
+        return CONFIG.CURSOR_START_POSITION + (CONFIG.CURSOR_END_POSITION - CONFIG.CURSOR_START_POSITION) * eased;
+    }
+
     updateTransform() {
         const scale = this.currentScale;
 
@@ -476,7 +464,7 @@ class WritingApp {
 
         const cursorY = anchor.offsetTop;
         const cursorViewportY = cursorY * scale;
-        const targetY = this.viewportH * CONFIG.CURSOR_VERTICAL_POSITION;
+        const targetY = this.viewportH * this.getCursorVerticalPosition();
         const offsetY = targetY - cursorViewportY;
         const clampedOffsetY = Math.min(0, offsetY);
 
@@ -498,21 +486,16 @@ class WritingApp {
     startAnimation() {
         if (this.animationId) return;
         const tick = () => {
-            this.zoomVelocity *= CONFIG.ZOOM_DECAY;
-            this.currentScale += this.zoomVelocity;
+            // Zoom: simple lerp toward target
+            this.currentScale += (this.zoomTargetScale - this.currentScale) * CONFIG.ZOOM_LERP;
+            const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
+            if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
             const stretchSettled = this.applyStretch();
             this.updateTransform();
             this.updateFade();
 
-            const zoomSettled = Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
-                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005;
-
             if (zoomSettled && stretchSettled) {
-                this.currentScale = this.zoomTargetScale;
-                this.applyStretch();
-                this.updateTransform();
-                this.updateFade();
                 this.animationId = null;
                 return;
             }
@@ -524,18 +507,18 @@ class WritingApp {
     applyStretch() {
         const scale = this.currentScale;
         const targetWidth = (this.viewportW / scale) - 40;
-        const lerpFactor = 0.12; // ease-out lerp per frame (~250ms settle)
+        const lerpFactor = CONFIG.STRETCH_LERP;
         let allSettled = true;
 
         const children = this.textDisplay.children;
         for (let i = 0; i < this.lockedLines.length && i < children.length; i++) {
             const line = this.lockedLines[i];
             const n = line.text.length;
-            const targetSpacing = n > 0 ? targetWidth / n - this.charW : 0;
-            if (line.currentSpacing == null) line.currentSpacing = targetSpacing;
-            line.currentSpacing += (targetSpacing - line.currentSpacing) * lerpFactor;
-            if (Math.abs(line.currentSpacing - targetSpacing) < 0.01) {
-                line.currentSpacing = targetSpacing;
+            // Enter lines stay at 0, others stretch to fill current viewport width
+            const target = (line.hasNewline || n === 0) ? 0 : targetWidth / n - this.charW;
+            line.currentSpacing += (target - line.currentSpacing) * lerpFactor;
+            if (Math.abs(line.currentSpacing - target) < 0.05) {
+                line.currentSpacing = target;
             } else {
                 allSettled = false;
             }

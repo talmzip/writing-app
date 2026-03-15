@@ -1,13 +1,12 @@
 # Dev Log
 
-## 2026-03-15 — Line drop stretch animation, space threshold fix, mobile tap-to-begin
-- Locked lines now lerp their letter-spacing from current value to target via per-frame lerp (factor 0.12) in applyStretch(), preventing visual pop on line completion
-- Each locked line stores `currentSpacing` at lock time (inherits active line's spacing)
-- Animation loop continues until all line spacings settle (not just zoom)
-- Space-triggered line drop threshold fixed: uses effective CPL accounting for squeeze, threshold changed from ≤2 to ≤1 to fix off-by-one from space char being counted in lineLen
-- Replaced autofocus + touchstart hack with tap-to-begin overlay (#tap-to-begin) that satisfies mobile browser user-activation requirement for keyboard focus
-- On desktop the overlay auto-hides after focus succeeds; on mobile user taps to activate
-- Removed `autofocus` attribute from hidden textarea
+## 2026-03-15 — Prompt overlay, enter line behavior, stretch-zoom unification, cursor position
+- Added "what's on your mind?" prompt overlay — italic, gray, centered. Tap anywhere to dismiss, focus textarea, show cursor. Solves mobile keyboard activation via user gesture.
+- Enter-created lines (hasNewline) no longer stretch to fill viewport — kept at 0 letter-spacing to visually mark intentional line breaks.
+- Removed separate stretch lerp animation. Spacing is now derived directly from current scale each frame — rides the zoom momentum, no visible separate animation.
+- Cursor vertical position interpolates from center (0.5) at start to lower third (2/3) at max zoom, using same ramp/easing as zoom.
+- Space-triggered line drop: fires when line has ≥ cpl-1 chars (unsqueezed capacity).
+- Removed `autofocus` attribute from hidden textarea.
 
 ## 2026-03-14 — Graduated stretch + mobile keyboard
 - Changed from uniform to graduated per-line stretch based on birth scale
