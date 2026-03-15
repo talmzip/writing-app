@@ -262,9 +262,15 @@ class WritingApp {
         this.cursorEl.style.display = 'none';
         this.newSessionBtn.classList.remove('visible');
         clearTimeout(this.inactivityTimer);
-        // Remove transform so content flows naturally for native scroll
-        this.textWorld.style.transform = 'none';
-        this.textWorld.style.position = 'relative';
+        // Hide fade overlay
+        this.fadeOverlay.style.display = 'none';
+        // Keep scale, position from top, leave bottom gap for New button
+        const scale = this.currentScale;
+        const contentHeight = this.textDisplay.scrollHeight * scale;
+        const gap = this.lineH * scale * 3; // space for New button
+        this.textWorld.style.transform = `scale(${scale})`;
+        // Set explicit height so viewport knows scrollable area
+        this.textWorld.style.height = (this.textDisplay.scrollHeight + gap / scale) + 'px';
         // Enable native scrolling
         this.viewport.style.overflow = 'auto';
         this.viewport.style.webkitOverflowScrolling = 'touch';
@@ -273,8 +279,10 @@ class WritingApp {
     enterWritingMode() {
         this.isReadingMode = false;
         this.cursorEl.style.display = '';
-        // Restore transform positioning
-        this.textWorld.style.position = 'absolute';
+        // Restore fade overlay
+        this.fadeOverlay.style.display = '';
+        // Restore writing layout
+        this.textWorld.style.height = '';
         this.viewport.style.overflow = 'hidden';
         this.viewport.scrollTop = 0;
         // Refocus textarea (user gesture context)
@@ -593,11 +601,19 @@ class WritingApp {
             const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
             if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
-            // Viewport height: spring lerp with gentle bounce
+            // Viewport height: spring for writing→reading, fast lerp for reading→writing
             const viewportDiff = this.viewportH - this.renderedViewportH;
-            this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
-            this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
-            this.renderedViewportH += this.viewportVelocity;
+            const keyboardOpening = viewportDiff < 0; // viewport shrinking = keyboard appearing
+            if (keyboardOpening) {
+                // Reading→writing: fast, no bounce
+                this.renderedViewportH += viewportDiff * 0.12;
+                this.viewportVelocity = 0;
+            } else {
+                // Writing→reading: spring with subtle bounce
+                this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
+                this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
+                this.renderedViewportH += this.viewportVelocity;
+            }
             const viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
             if (viewportSettled) {
                 this.renderedViewportH = this.viewportH;
