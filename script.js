@@ -25,8 +25,8 @@ const CONFIG = {
     // Stretch lerp for locked lines
     STRETCH_LERP: 0.008,         // very slow — ~2-3s settle, peripheral vision only
     // Viewport resize lerp (keyboard open/close)
-    VIEWPORT_LERP: 0.08,         // smooth with gentle bounce
-    VIEWPORT_BOUNCE: 0.12,       // overshoot amount (fraction of remaining distance)
+    VIEWPORT_LERP: 0.06,         // smooth transition
+    VIEWPORT_BOUNCE: 0.35,       // high damping = very subtle overshoot
     // Responsive zoom: reference viewport area (desktop ~1920x1080)
     ZOOM_REF_AREA: 1920 * 1080,
     // Line break mode: 'squeeze' (default), 'justified', or 'natural'
@@ -262,6 +262,9 @@ class WritingApp {
         this.cursorEl.style.display = 'none';
         this.newSessionBtn.classList.remove('visible');
         clearTimeout(this.inactivityTimer);
+        // Remove transform so content flows naturally for native scroll
+        this.textWorld.style.transform = 'none';
+        this.textWorld.style.position = 'relative';
         // Enable native scrolling
         this.viewport.style.overflow = 'auto';
         this.viewport.style.webkitOverflowScrolling = 'touch';
@@ -270,11 +273,14 @@ class WritingApp {
     enterWritingMode() {
         this.isReadingMode = false;
         this.cursorEl.style.display = '';
-        // Disable native scrolling
+        // Restore transform positioning
+        this.textWorld.style.position = 'absolute';
         this.viewport.style.overflow = 'hidden';
+        this.viewport.scrollTop = 0;
         // Refocus textarea (user gesture context)
         this.hiddenInput.focus({ preventScroll: true });
-        // Viewport will resize when keyboard opens — animation handles it
+        // Re-render to restore transform
+        this.updateTransform();
         this.resetInactivityTimer();
     }
 
