@@ -229,15 +229,13 @@ class WritingApp {
 
         // On blur, check if keyboard was dismissed → enter reading mode
         this.hiddenInput.addEventListener('blur', () => {
-            setTimeout(() => {
-                const promptOpen = document.getElementById('prompt-overlay');
-                if (promptOpen) return;
-                // If viewport height grew, keyboard was dismissed
-                const currentH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                if (currentH > this.renderedViewportH + 50) {
-                    this.enterReadingMode();
-                }
-            }, 100);
+            const promptOpen = document.getElementById('prompt-overlay');
+            if (promptOpen) return;
+            // Check immediately — don't wait for resize to mess things up
+            const currentH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            if (currentH > this.renderedViewportH + 50) {
+                this.enterReadingMode();
+            }
         });
 
         // Resize
@@ -308,10 +306,13 @@ class WritingApp {
         clearTimeout(this.inactivityTimer);
         // Hide fade overlay
         this.fadeOverlay.style.display = 'none';
-        // Freeze the scale — don't let resize change it
+        // Freeze scale and spacing — nothing changes visually
         this.readingScale = this.currentScale;
         // Start scroll at current writing position
         this.readingScrollY = this.currentOffsetY;
+        // Expand viewport to full screen (keyboard is gone) via animation
+        this.updateViewportSize();
+        this.startAnimation();
         this.applyReadingTransform();
     }
 
@@ -673,20 +674,36 @@ class WritingApp {
     startAnimation() {
         if (this.animationId) return;
         const tick = () => {
-            // Zoom: simple lerp toward target
+            if (this.isReadingMode) {
+                // In reading mode: only animate viewport height, skip everything else
+                const viewportDiff = this.viewportH - this.renderedViewportH;
+                this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
+                this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
+                this.renderedViewportH += this.viewportVelocity;
+                const viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
+                if (viewportSettled) {
+                    this.renderedViewportH = this.viewportH;
+                    this.viewportVelocity = 0;
+                    this.animationId = null;
+                    return;
+                }
+                this.viewport.style.height = this.renderedViewportH + 'px';
+                this.animationId = requestAnimationFrame(tick);
+                return;
+            }
+
+            // Writing mode: zoom, stretch, transform, fade
             this.currentScale += (this.zoomTargetScale - this.currentScale) * CONFIG.ZOOM_LERP;
             const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
             if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
-            // Viewport height: spring for writing→reading, fast lerp for reading→writing
+            // Viewport height lerp
             const viewportDiff = this.viewportH - this.renderedViewportH;
-            const keyboardOpening = viewportDiff < 0; // viewport shrinking = keyboard appearing
+            const keyboardOpening = viewportDiff < 0;
             if (keyboardOpening) {
-                // Reading→writing: fast, no bounce
                 this.renderedViewportH += viewportDiff * 0.12;
                 this.viewportVelocity = 0;
             } else {
-                // Writing→reading: spring with subtle bounce
                 this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
                 this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
                 this.renderedViewportH += this.viewportVelocity;
