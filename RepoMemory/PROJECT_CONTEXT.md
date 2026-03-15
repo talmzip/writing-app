@@ -5,22 +5,26 @@ A minimalist, distraction-free writing app for Morning Pages / stream-of-conscio
 
 ## Current state
 - Writing experience: open, type, zoom-out effect as you write
-- Zoom: continuous CSS `transform: scale()` with momentum-based animation
+- Zoom: continuous — text rendered at actual visual font size (BASE_FONT_SIZE * scale), no CSS transform scale
 - Lines: each line is a locked DOM element — no reflow during zoom
-- Stretch: global `letter-spacing` keeps text filling the viewport at all scales
-- Two line-break modes (dev toggle Ctrl+Shift+J): Justified (break-all) and Natural (word-wrap)
-- Cursor: positioned via anchor span, scales with text-world
+- Stretch: per-line `letter-spacing` keeps text filling the viewport at all scales
+- Squeeze mode (default): negative letter-spacing compresses active line when it exceeds cpl
+- Two additional line-break modes (dev toggle Ctrl+Shift+J): Justified and Natural
+- Cursor: positioned via anchor span, height/width scale with font size
 - Fade: top gradient overlay when content scrolls off top
+- Reading mode: keyboard close triggers native-scroll reading view; tap to resume writing
 - Sessions: autosaved to localStorage, viewable via corner button
 - RTL: auto-detected for Hebrew text
+- Prompt overlay: "what's on your mind?" — tap to start
 
 ## Key files
 - `index.html` — markup shell
 - `styles.css` — all styling
 - `script.js` — `WritingApp` class, `SessionStorage`, `sessionsUI`
-- `WritingAppDesign.md` — design vision and changelog
+- `WritingAppDesign.md` — design vision
 
 ## Known issues / next steps
-- Momentum CONFIG values (zoom, stretch, fade) need in-browser tuning
+- Reading mode transition needs mobile testing (iOS Safari, Chrome Android)
 - RTL with letter-spacing stretch untested
-- Tap-to-begin overlay needs mobile browser testing (iOS Safari, Chrome Android)
+- Sessions toggle button hidden (awaiting redesign)
+- Future: writing behavior tracking, gap UI with reactive visuals

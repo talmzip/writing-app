@@ -1,185 +1,124 @@
 # Writing App — Design & Vision
-Status: Partially Implemented
 
 ## Essence
 
-Writing is thinking slowed down. When you write by hand, your thoughts move at the speed of your pen — not the speed of your anxiety. This app exists to recreate that feeling on a screen. You open it, you write, and for a few minutes the only thing that exists is the word you're forming right now. Not what you wrote before. Not what you'll write next. Just this word, here, now.
+Writing is thinking slowed down. When you write by hand, your thoughts move at the speed of your pen — not the speed of your anxiety. This app recreates that feeling on a screen. You open it, you write, and for a few minutes the only thing that exists is the word you're forming right now.
 
-The goal is a place where people come to calm down through writing. A blank page that asks nothing of you and gives you nothing to manage. The output doesn't matter. The act of writing is the entire point.
+The goal is a place where people come to calm down through writing. A blank page that asks nothing and gives nothing to manage. The output doesn't matter. The act of writing is the entire point.
 
-## Overview
+## The Experience
 
-A minimalist, distraction-free writing app inspired by the *Morning Pages* practice from "The Artist's Way." The app is a digital blank page for stream-of-consciousness brain-dump. The experience should feel like putting pen to paper: immediate, private, and frictionless. No UI chrome, no distractions, no features that invite overthinking.
+### Opening
 
-Accessible from both PC and mobile browser. Hosted for free (GitHub Pages). No accounts, no backend.
+You open the app. A white screen. Centered in gray italic: *"what's on your mind?"* — a gentle nudge, not a command. Tap anywhere. The keyboard appears, the prompt fades, and you're writing.
 
-## Writing Experience
+> The prompt text is a placeholder — the concept stays, the words might change.
 
-### Start State
-You open the app. A blank page. You start typing. Your first words appear large — filling most of the screen, roughly 5–6 words visible. The text is intimate. It's just you and your words. There is nothing else on screen.
+### Writing
 
-### The Zoom
-As you write more, the "camera" slowly pulls back. You don't see the text change — you see more of it. The text stays laid out the same way, but the viewport gradually reveals more words on screen. This creates a sense of gentle progression: you're filling a space, building something, without anything being taken away.
+Your first words appear large, filling most of the screen. It's intimate — just you and your words. Nothing else on screen.
 
-The zoom is **continuous**, not staged. Every character you type zooms out by a tiny amount. The zoom follows an ease-out curve so early characters cause more noticeable zoom (when the text is most intimate) and later characters barely change anything (the view has settled). This feels natural — like a camera gently pulling back as you fill the page.
+As you type, the view slowly pulls back. Every character zooms out by a tiny amount, following an ease-out curve. Early characters cause noticeable movement (when the text is most intimate), later characters barely change anything. It feels like a camera gently pulling back as you fill a page.
 
-**Zoom parameters** (configurable in `CONFIG`):
-- Start: ~30 characters visible (~5 words)
-- End: ~600 characters visible (~100 words)
-- Ramp: reaches max zoom after ~360 characters (~60 words written)
+The zoom is animated with a gentle lerp — no snapping, no jitter.
 
-The text itself always maintains a **solid rectangle shape** — words break mid-word at the line edge (`word-break: break-all`). This is intentional: the monospace grid stays perfectly dense and uniform, reinforcing the typewriter/paper feel.
+**The text always fills the screen edge to edge.** Words break mid-word at the line edge to maintain a dense, uniform monospace rectangle. This is intentional — typewriter/paper feel.
 
-### Max State and Fade
-At a certain point the zoom reaches its maximum — the screen fits a defined amount of content and won't zoom out further. Beyond this, old content begins to scroll off the top of the screen.
+### Cursor
 
-The content that leaves the screen **fades out gradually**. Not a hard cut, not a jump. A smooth opacity gradient covers the top half of the topmost visible line — words gently dissolve as they approach the edge. Smoothness is the absolute top priority for this effect. The feeling should be that your words were here, they existed, and now they're quietly letting go — reinforcing that the past doesn't matter, stay present.
+The cursor starts at vertical center when the page is empty, then gradually settles to the lower third as lines accumulate. Your latest words stay prominent and central.
 
-Start with per-line fade. If it feels too chunky, explore per-word fade. The right answer will come from feeling it in the browser.
+### Line Drops
 
-### Cursor Position
-The cursor sits in the **lower third** of the screen. Your latest words are prominent and central to your attention, but not pushed to the very edge. There is visual ground below — the writing area feels grounded, not precarious.
+When a line fills up (character count reaches capacity minus one), the next space triggers a line drop instead of inserting a space. This makes the transition to a new line feel natural — you're always mid-thought when it happens.
+
+### Enter = Breath
+
+Enter creates a new line. Multiple consecutive Enters collapse into one — you can't create empty space. Enter-created lines intentionally don't stretch to fill the viewport. They stay short. A line break is a poetic choice, a pause, a breath. It should look different from a full line.
+
+### Line Locking & Stretch
+
+Each line is a separate DOM element. Once the cursor moves to the next line, the previous line locks — its content never changes again.
+
+As the view zooms out, locked lines smoothly stretch (via letter-spacing) to keep filling the viewport edge to edge. The stretch animation is slow and subtle (~2-3 seconds to settle). Lines written earlier stretch more than recent ones. The active line has zero stretch — typing always feels like a fresh blank page.
+
+### Max Zoom & Fade
+
+At a certain point (~600 characters) the zoom maxes out. Beyond this, old content scrolls off the top.
+
+Content leaving the screen **fades out gradually** — a smooth opacity gradient dissolves words as they approach the top edge. The feeling: your words existed, and now they're quietly letting go. Stay present.
+
+### Responsive
+
+Smaller screens get proportionally larger max-zoom text. The zoom range scales by viewport area relative to a desktop reference.
 
 ### Mobile
-The virtual keyboard is always present during a session. The writing area is the viewport space **above the keyboard** — all layout, zoom stages, and cursor positioning are calculated relative to this available space, not the full screen. The experience should feel identical to desktop, just in a smaller canvas.
 
-### Line Breaks
-Enter works. A line break is a breath, a shift, a poetic choice. It carries meaning about the writer's mental state. Single Enter creates a new line. Multiple consecutive Enters collapse into one — you can't skip lines or create empty space. This keeps the flow honest and the visual effect clean.
+The virtual keyboard is always present during writing. All layout is calculated relative to the space above the keyboard. The experience should feel identical to desktop, just in a smaller canvas.
 
-### Session
-Every session starts blank. Always. There is no "continue where you left off." The blank page is the ritual.
+Keyboard open/close uses a spring-based animation (gentle lerp with subtle damping) so the viewport transition feels smooth, not jarring.
 
-Sessions are **autosaved to localStorage** every 5 seconds (configurable). Only sessions with 3+ words are saved. A minimal sessions viewer is accessible via a nearly-invisible button in the top-right corner — deliberately low-key so it doesn't distract from writing. The viewer shows past sessions with date, preview, word count, and duration. You can read or delete old sessions. The sessions screen is a separate view, not an overlay on the writing canvas.
+## Reading Mode
 
-Future ideas include analytics and insights built on top of saved sessions.
+When the user folds the keyboard (or the textarea loses focus), the app enters **reading mode**:
+
+- Cursor disappears
+- Text expands to fill the full screen (no longer limited to above-keyboard area)
+- The user can scroll through what they've written
+- Tap anywhere to return to writing mode (keyboard reopens)
+
+The visual transition must be smooth — text expanding from half-screen to full-screen. **The per-line stretch values and visual character of the text must be preserved.** Reading mode is not a reformat — it's the same beautiful text, just shown in a larger viewport.
+
+> **Current status:** Reading mode is fundamentally broken. CSS `transform: scale()` doesn't affect layout, so native scroll doesn't know the visual content size. The planned fix is to remove CSS transform scaling entirely and render at actual visual sizes (computed font-size + proportional letter-spacing). This is a rendering engine refactor.
+
+## New Session
+
+A "New" button appears in the gap between the cursor and the bottom of the screen after 2.5 seconds of inactivity. It fades in gently (0.6s ease-in). Tapping it saves the current session and starts fresh.
+
+Every session starts blank. Always. The blank page is the ritual.
+
+## Sessions
+
+Sessions autosave to localStorage every 5 seconds. Only sessions with 3+ words are saved. A minimal viewer shows past sessions with date, preview, word count, and duration. You can read or delete old sessions.
+
+The sessions viewer is a separate screen, not an overlay on the writing canvas. Access point is deliberately subtle — it shouldn't distract from writing.
+
+## Future: The Gap
+
+The space between the cursor and the bottom of the screen is prime real estate. Currently it holds the "New" button during inactivity. The vision is bigger:
+
+**The gap becomes a reactive UI zone.** It responds to writing behavior — speed, fluidity, pauses, rhythm. Imagine:
+
+- Subtle visual feedback that reflects your writing state
+- Generative visuals or shaders that pulse with your rhythm
+- Data-driven elements that respond to writing patterns
+- A space that feels alive while you write, without demanding attention
+
+This requires **writing behavior tracking**: typing speed, pause duration, burst patterns, session flow. The tracking infrastructure is a prerequisite. The gap UI is the creative application layer on top.
 
 ## Core Principles
-- **Here and now.** The app puts the present moment in the center. No scrolling back, no future targets, no progress bars.
-- **Stability.** Nothing changes quickly. The writer should feel grounded at all times.
-- **Smoothness.** Every visual transition is gradual and eased. Jarring changes break the meditative state.
-- **Simplicity.** No UI to manage. No settings to fiddle with. Open and write.
-- **Words fill the space.** The text is never small and lonely in a corner. Words always feel like they belong to the whole screen.
 
-## Technical Notes
+- **Here and now.** The present moment is center stage. No scrolling back, no progress bars, no targets.
+- **Stability.** Nothing changes quickly. The writer feels grounded at all times.
+- **Smoothness.** Every transition is gradual and eased. Jarring changes break the meditative state.
+- **Simplicity.** No UI to manage. No settings. Open and write.
+- **Words fill the space.** Text is never small and lonely in a corner. Words always belong to the whole screen.
 
-### Stack & Hosting
-- Vanilla HTML/CSS/JS. No framework needed at current scope.
-- Hosted on GitHub Pages — free, zero config, deploys from the repo.
+## Technical Stack
+
+- Vanilla HTML/CSS/JS. No framework at current scope.
+- GitHub Pages — free, zero config, deploys from repo.
 - No backend, no accounts, no server.
+- Three files: `index.html`, `styles.css`, `script.js`.
 
-### Implementation Architecture
-- **Input:** Hidden `<textarea>` captures all input (works on mobile + desktop). `input` event for text, `keydown` for Enter handling.
-- **Rendering:** Text rendered into `#text-display` with `white-space: pre-wrap` and `word-break: break-all`. Words split mid-word to maintain a solid rectangle text block.
-- **Lines:** Each line is a separate `<div class="line">` with `white-space: pre`. Lines are "locked" once the next line begins — content never changes. Line breaking is computed in JS (not CSS wrapping).
-- **Zoom:** Continuous. CSS `transform: scale(S)` on `#text-world` container. Text always rendered at `BASE_FONT_SIZE` (48px). Scale interpolated between start/end values based on character count with ease-out curve.
-- **Stretch:** Per-line `letter-spacing` based on each line's birth scale. Graduated during zoom-out (active line = 0 stretch, older lines = more stretch), settling to uniform at max zoom. Derived from current scale each frame — no separate animation.
-- **Cursor:** Positioned via a zero-width anchor `<span>` at end of text. `offsetLeft`/`offsetTop` give exact position within text-world. Cursor div inside text-world, so it scales automatically.
-- **Scroll:** `translateY` offset keeps cursor at lower third. Clamped so text starts at top on short content.
-- **Fade:** CSS gradient overlay on `#viewport`, height tied to line height × scale. Only appears when content scrolls off top.
-- **Sessions:** Autosaved to `localStorage` every 5s. Minimal viewer UI with list → detail → delete flow.
-- **RTL:** Detected from Hebrew Unicode range. Toggles `direction: rtl`, `transform-origin` flips to `100% 0`.
+## Architecture
 
-## Remaining Design Questions
-- Should there be any subtle ambient feedback (e.g. a barely-visible word count)?
-- Fade smoothness tuning — test in browser.
-- Zoom transition feel tuning — test in browser.
-
-## Resolved: Text Width vs. Line Stability — Line Locking + Stretch
-
-The zoom system scales a fixed-width text-world via CSS `transform: scale()`. The challenge was: as scale changes, either the text reflows (dynamic width) or it shrinks away from the edges (fixed width).
-
-**Solution: locked lines + global letter-spacing stretch.**
-
-Each line of text is a separate DOM element (`<div class="line">`). Once the cursor moves to the next line, the previous line's content is permanently locked — it never reflows regardless of scale or container width changes.
-
-As scale decreases, the text block would shrink away from the screen edges. To prevent this, we apply **graduated letter-spacing stretch** based on each line's birth scale — the scale at which it was the active line.
-
-**Graduated stretch:** Each locked line remembers what scale it was written at. The stretch applied to that line is proportional to the difference between its birth scale and the current scale. Lines written early (large birth scale) accumulate more stretch. The active line's birth scale equals current scale, so its stretch is always zero — typing always feels like a fresh blank page.
-
-As zoom-out completes (scale reaches scaleEnd), the graduated factor eases to 0 and all locked lines settle to the same uniform stretch, filling the viewport edge-to-edge.
-
-Scale target updates per character typed. Actual rendered scale lerps toward its target via momentum (velocity + decay) for smooth ease-out. Per-line stretch is derived directly from the current scale each animation frame.
-
-**Two line-breaking modes** (dev toggle via Ctrl+Shift+J):
-- **Justified Flow** (`break-all`): Characters break at exact `charsPerLine` boundaries. Dense rectangle.
-- **Natural Flow** (`word-wrap`): Break at word boundaries. Ragged right edge.
-
-Both use the same stretch mechanism. Default is Justified Flow.
-
-## Next Step
-Tune zoom, stretch, and fade momentum CONFIG values by feel in the browser.
-
----
-## Changelog
-### 2026-03-14 — Graduated stretch + mobile keyboard fix
-- Changed from uniform stretch to graduated per-line stretch based on birth scale.
-- Each locked line stores its birth scale. Stretch = `charW × (birthScale / currentScale − 1)`.
-- Active line always has 0 letter-spacing — typing feels like a fresh page.
-- Graduated factor eases from 1 (fully graduated) to 0 (uniform) as scale approaches scaleEnd.
-- Removed separate stretch momentum animation — stretch is now derived from scale each frame.
-- Added `autofocus` to hidden textarea and document-level touchstart focus for mobile keyboard.
-- Reduced blur-refocus delay from 100ms to 50ms for snappier keyboard recovery.
-- Status: Partially Implemented (needs in-browser tuning)
-
-### 2026-03-14 — Line locking + stretch (text width stability resolved)
-- Resolved the Open Design Challenge: text no longer reflows during zoom.
-- Each line rendered as a separate `<div class="line">` that locks once the next line begins.
-- Added letter-spacing stretch computed from scale so full lines always fill the viewport.
-- Zoom animates via momentum (acceleration + decay) for smooth ease-out.
-- Removed dynamic text-world width updates — width is now fixed at max stretch case.
-- Added two line-breaking modes as dev toggle (Ctrl+Shift+J): Justified Flow (break-all) and Natural Flow (word-wrap).
-- Line splitting computed in JS; CSS `white-space: pre` on each line div prevents browser reflow.
-
-### 2026-03-13 — Momentum animations, RTL fix, responsive width fix
-- Added momentum-based zoom animation (acceleration + decay via rAF). Zoom now glides smoothly when typing and decays gently when stopping.
-- Added momentum-based fade animation for the top gradient overlay.
-- Fixed RTL: removed broken transform-origin flip, replaced with translateX positioning that aligns text-world right edge to viewport.
-- Fixed text overflow: text-world width now tracks current scale so text stays within visible area at all zoom levels.
-- Known issue: dynamic width causes line reflow during zoom (text rewraps as width changes). See "Open Design Challenge" section.
-- Clipboard operations (Ctrl+A/C/V) work via the hidden textarea.
-- Status: Partially Implemented (text width stability unresolved)
-
-### 2026-03-11 — Switched to continuous zoom + rectangle text
-- Replaced staged zoom with continuous zoom (ease-out interpolation per character)
-- Removed zoom-animating CSS class — scale updates instantly every keystroke
-- Changed `overflow-wrap: break-word` to `word-break: break-all` — words split mid-word to maintain solid rectangle text block
-- Updated CONFIG: replaced STAGES array with ZOOM_START_CHARS, ZOOM_END_CHARS, ZOOM_RAMP_CHARS
-- Removed stage tracking logic (currentStageIndex, getCurrentStageIndex, etc.)
-
-### 2026-03-11 — Phase 1 implemented
-- Complete rewrite of all three files (index.html, styles.css, script.js)
-- Hidden textarea input for cross-platform compatibility (desktop + mobile)
-- CSS transform-based zoom with 5 configurable stages
-- Words no longer split mid-word (overflow-wrap: break-word replaces fixed-char slicing)
-- Cursor positioned via anchor span, scales with text-world automatically
-- Zoom transitions only animate on stage change, scroll tracking is instant
-- Fade overlay appears when content scrolls off top
-- Session autosave to localStorage every 5s
-- Minimal past-sessions viewer (list, detail, delete) accessible via corner button
-- RTL support preserved with transform-origin flip
-- Status: Partially Implemented (needs in-browser tuning)
-
-### 2026-03-11 — Design parameters finalized
-- Set zoom stages: 5 → 15 → 30 → 60 → 100 words-per-screen
-- Max state: ~100 words visible on screen
-- Fade: top half of the topmost line, smooth gradient
-- Mobile: layout calculated for space above keyboard
-- Zoom transition: subtle ease, fast enough for continuous writing
-- Confirmed vanilla HTML/CSS/JS + GitHub Pages as final stack
-- Status moved to Designed, next step is implementation
-
-### 2026-03-11 — Full design documented
-- Added Essence section capturing the philosophy and final goal
-- Defined the complete writing experience: start state, zoom stages, max state with fade, cursor position, line breaks, session model
-- Established core design principles (here and now, stability, smoothness, simplicity)
-- Documented zoom implementation approach (CSS transform scaling)
-- Moved resolved questions into the design, kept remaining unknowns that need prototyping
-- Separated phase 1 (writing experience) from phase 2 (saving, analytics)
-
-### 2026-03-11 — Brainstorm session, intent defined
-- Established morning pages / writing-meditation as the core intent
-- Confirmed mobile support as a first-class requirement
-- Decided on vanilla JS + GitHub Pages as the stack
-
-### 2026-03-11 — File created
-- Documented current state and open design questions
+- **Input:** Hidden `<textarea>` captures all input (mobile + desktop). `input` event for text, `keydown` for Enter.
+- **Rendering:** Text in `#text-display` as locked `<div class="line">` elements. Line breaking computed in JS.
+- **Zoom:** Continuous CSS `transform: scale()` on `#text-world`. Base font 48px, scale interpolated with ease-out curve. *(Planned: replace with actual font-size rendering.)*
+- **Stretch:** Per-line `letter-spacing` with slow lerp animation. Active line = 0 spacing. Locked lines stretch toward target computed from current scale each frame.
+- **Cursor:** Positioned via zero-width anchor `<span>`. Cursor div inside text-world, scales with transform.
+- **Scroll:** `translateY` keeps cursor at target vertical position. Clamped for short content.
+- **Fade:** CSS gradient overlay, height tied to line height × scale. Appears when content scrolls off top.
+- **Sessions:** `localStorage` autosave. Minimal viewer with list → detail → delete flow.
+- **RTL:** Auto-detected from Hebrew Unicode range. Flips direction and transform-origin.

@@ -1,5 +1,16 @@
 # Dev Log
 
+## 2026-03-15 — Rendering engine refactor: removed CSS scale()
+- Replaced CSS `transform: scale()` with actual visual font size rendering
+- Text now rendered at `BASE_FONT_SIZE * currentScale` — browser sees real dimensions
+- Removed all `scale()` from CSS transforms; only `translateY` (and `translateX` for RTL) remain
+- Letter-spacing, squeeze, fade, cursor all use visual dimensions (charW * scale, lineH * scale)
+- Cursor width now scales proportionally (min 1.5px)
+- Text-world width set to viewport width (was viewportW / scaleEnd for scale compensation)
+- Reading mode: native browser scroll (overflow-y: auto) replaces manual touch scroll
+- Removed: readingScrollY, readingTouchStartY, readingScrollVelocity, readingScale, applyReadingTransform, clampReadingScroll, startReadingMomentum, wheel handler
+- Touch handlers simplified: writing mode = focus, reading mode = tap (no drag) to exit
+
 ## 2026-03-15 — Centered cursor start, responsive zoom, smooth keyboard transition
 - Cursor starts at vertical center (0.5) and interpolates to lower third (2/3) as writing progresses
 - Text-world pushed down via positive translateY so cursor sits mid-screen early on; as lines fill upward toward top edge, clamp kicks in and normal scrolling begins
