@@ -90,6 +90,28 @@ html, body {
     border: none;
 }
 
+#tap-to-begin {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 500;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Courier New', monospace;
+    font-size: 18px;
+    color: rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#tap-to-begin.hidden {
+    display: none;
+}
+
 /* ── Sessions Toggle Button ── */
 
 #sessions-toggle {

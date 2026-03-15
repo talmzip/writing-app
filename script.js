@@ -83,7 +83,7 @@ class WritingApp {
         this.setupTextWorld();
         this.setupEventListeners();
         this.render();
-        this.focusInput();
+        this.setupTapToBegin();
         this.startAutosave();
     }
 
@@ -145,14 +145,12 @@ class WritingApp {
             if (e.key === 'Enter') this.handleEnter(e);
         });
 
-        // Focus management — click anywhere to focus the textarea
+        // Focus management — click/tap anywhere to refocus the textarea
         this.viewport.addEventListener('click', () => this.focusInput());
         this.viewport.addEventListener('touchstart', (e) => {
             e.preventDefault();
             this.focusInput();
         });
-        // Mobile: force keyboard open on first touch if autofocus was blocked
-        document.addEventListener('touchstart', () => this.focusInput(), { once: true });
 
         // Refocus on blur, but not if sessions screen is open
         this.hiddenInput.addEventListener('blur', () => {
@@ -191,6 +189,31 @@ class WritingApp {
             this.saveCurrentSession();
             sessionsUI.show();
         });
+    }
+
+    setupTapToBegin() {
+        const overlay = document.getElementById('tap-to-begin');
+        if (!overlay) {
+            this.focusInput();
+            return;
+        }
+        // On desktop, try focusing immediately — if it works, skip overlay
+        this.hiddenInput.focus({ preventScroll: true });
+        // Short delay to check if focus actually took (keyboard opened)
+        setTimeout(() => {
+            if (document.activeElement === this.hiddenInput) {
+                overlay.classList.add('hidden');
+            }
+        }, 300);
+        // Tap/click handler satisfies user-activation requirement for mobile
+        const activate = (e) => {
+            e.preventDefault();
+            this.hiddenInput.focus({ preventScroll: true });
+            overlay.classList.add('hidden');
+            this.isActivated = true;
+        };
+        overlay.addEventListener('click', activate);
+        overlay.addEventListener('touchend', activate);
     }
 
     focusInput() {
@@ -272,6 +295,7 @@ class WritingApp {
     processRemainingSqueeze(remaining, cpl, birthScale) {
         const refWidth = (this.viewportW / birthScale) - 40;
         const maxChars = Math.floor(refWidth / (this.charW * CONFIG.SQUEEZE_MIN_RATIO));
+        const activeSpacing = this.getActiveLineSpacing(birthScale);
         let lineStart = 0;
 
         for (let i = 0; i < remaining.length; i++) {
@@ -284,20 +308,29 @@ class WritingApp {
                     birthScale,
                     hasNewline: true,
                     hasDropSpace: false,
+                    currentSpacing: activeSpacing,
                 });
                 lineStart = i + 1;
                 continue;
             }
 
             if (ch === ' ') {
-                const remainingRoom = cpl - lineLen;
-                if (remainingRoom <= 2) {
-                    // Line drop: lock line, consume space
+                // How many chars fit after this space for the next word?
+                // lineLen includes the space, so remaining slots = cpl - lineLen.
+                // In squeeze mode, chars can be narrower — use actual effective capacity.
+                const textLen = i - lineStart; // chars before the space
+                const currentCharW = textLen > 0
+                    ? Math.max(refWidth / textLen, this.charW * CONFIG.SQUEEZE_MIN_RATIO)
+                    : this.charW;
+                const effectiveCpl = Math.floor(refWidth / currentCharW);
+                const remainingRoom = effectiveCpl - lineLen;
+                if (remainingRoom <= 1) {
                     this.lockedLines.push({
                         text: remaining.slice(lineStart, i),
                         birthScale,
                         hasNewline: false,
                         hasDropSpace: true,
+                        currentSpacing: activeSpacing,
                     });
                     lineStart = i + 1;
                     continue;
@@ -311,6 +344,7 @@ class WritingApp {
                     birthScale,
                     hasNewline: false,
                     hasDropSpace: false,
+                    currentSpacing: activeSpacing,
                 });
                 lineStart = i;
             }
@@ -330,6 +364,7 @@ class WritingApp {
                     birthScale,
                     hasNewline: i === lines.length - 1,
                     hasDropSpace: false,
+                    currentSpacing: 0,
                 });
             }
         }
@@ -342,6 +377,7 @@ class WritingApp {
                 birthScale,
                 hasNewline: false,
                 hasDropSpace: false,
+                currentSpacing: 0,
             });
         }
         this.activeLine = lastLines[lastLines.length - 1] || '';
@@ -404,16 +440,12 @@ class WritingApp {
     }
 
     fullRender() {
-        const scale = this.currentScale;
-        const targetWidth = (this.viewportW / scale) - 40;
-
         let html = '';
         for (const line of this.lockedLines) {
-            const n = line.text.length;
-            const stretch = n > 0 ? targetWidth / n - this.charW : 0;
-            html += `<div class="line" style="letter-spacing:${stretch}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
+            const spacing = line.currentSpacing != null ? line.currentSpacing : 0;
+            html += `<div class="line" style="letter-spacing:${spacing}px">` + (this.escapeHtml(line.text) || '&nbsp;') + '</div>';
         }
-        const activeLS = this.getActiveLineSpacing(scale);
+        const activeLS = this.getActiveLineSpacing(this.currentScale);
         html += `<div class="line active" style="letter-spacing:${activeLS}px">` + this.escapeHtml(this.activeLine) + '<span id="cursor-anchor">\u200B</span></div>';
         this.textDisplay.innerHTML = html;
     }
@@ -477,12 +509,14 @@ class WritingApp {
             this.zoomVelocity *= CONFIG.ZOOM_DECAY;
             this.currentScale += this.zoomVelocity;
 
-            this.applyStretch();
+            const stretchSettled = this.applyStretch();
             this.updateTransform();
             this.updateFade();
 
-            if (Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
-                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005) {
+            const zoomSettled = Math.abs(this.zoomVelocity) < CONFIG.ZOOM_MIN_VELOCITY &&
+                Math.abs(this.currentScale - this.zoomTargetScale) < 0.0005;
+
+            if (zoomSettled && stretchSettled) {
                 this.currentScale = this.zoomTargetScale;
                 this.applyStretch();
                 this.updateTransform();
@@ -498,18 +532,29 @@ class WritingApp {
     applyStretch() {
         const scale = this.currentScale;
         const targetWidth = (this.viewportW / scale) - 40;
+        const lerpFactor = 0.12; // ease-out lerp per frame (~250ms settle)
+        let allSettled = true;
 
         const children = this.textDisplay.children;
         for (let i = 0; i < this.lockedLines.length && i < children.length; i++) {
-            const n = this.lockedLines[i].text.length;
-            const stretch = n > 0 ? targetWidth / n - this.charW : 0;
-            children[i].style.letterSpacing = stretch + 'px';
+            const line = this.lockedLines[i];
+            const n = line.text.length;
+            const targetSpacing = n > 0 ? targetWidth / n - this.charW : 0;
+            if (line.currentSpacing == null) line.currentSpacing = targetSpacing;
+            line.currentSpacing += (targetSpacing - line.currentSpacing) * lerpFactor;
+            if (Math.abs(line.currentSpacing - targetSpacing) < 0.01) {
+                line.currentSpacing = targetSpacing;
+            } else {
+                allSettled = false;
+            }
+            children[i].style.letterSpacing = line.currentSpacing + 'px';
         }
         // Active line: 0 stretch, or squeeze if overflowing in squeeze mode
         if (children.length > 0) {
             const activeLS = this.getActiveLineSpacing(scale);
             children[children.length - 1].style.letterSpacing = activeLS + 'px';
         }
+        return allSettled;
     }
 
     // ── Fade ──

@@ -23,3 +23,4 @@ A minimalist, distraction-free writing app for Morning Pages / stream-of-conscio
 ## Known issues / next steps
 - Momentum CONFIG values (zoom, stretch, fade) need in-browser tuning
 - RTL with letter-spacing stretch untested
+- Tap-to-begin overlay needs mobile browser testing (iOS Safari, Chrome Android)

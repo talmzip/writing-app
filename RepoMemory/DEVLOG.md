@@ -1,5 +1,14 @@
 # Dev Log
 
+## 2026-03-15 — Line drop stretch animation, space threshold fix, mobile tap-to-begin
+- Locked lines now lerp their letter-spacing from current value to target via per-frame lerp (factor 0.12) in applyStretch(), preventing visual pop on line completion
+- Each locked line stores `currentSpacing` at lock time (inherits active line's spacing)
+- Animation loop continues until all line spacings settle (not just zoom)
+- Space-triggered line drop threshold fixed: uses effective CPL accounting for squeeze, threshold changed from ≤2 to ≤1 to fix off-by-one from space char being counted in lineLen
+- Replaced autofocus + touchstart hack with tap-to-begin overlay (#tap-to-begin) that satisfies mobile browser user-activation requirement for keyboard focus
+- On desktop the overlay auto-hides after focus succeeds; on mobile user taps to activate
+- Removed `autofocus` attribute from hidden textarea
+
 ## 2026-03-14 — Graduated stretch + mobile keyboard
 - Changed from uniform to graduated per-line stretch based on birth scale
 - Active line always has 0 letter-spacing; older lines stretch more
