@@ -118,23 +118,7 @@ html, body {
 /* ── Sessions Toggle Button ── */
 
 #sessions-toggle {
-    position: fixed;
-    top: 12px;
-    right: 12px;
-    z-index: 100;
-    background: none;
-    border: none;
-    font-size: 18px;
-    color: rgba(0, 0, 0, 0.15);
-    cursor: pointer;
-    padding: 8px;
-    line-height: 1;
-    transition: color 0.3s ease;
-    font-family: inherit;
-}
-
-#sessions-toggle:hover {
-    color: rgba(0, 0, 0, 0.5);
+    display: none;
 }
 
 /* ── Sessions Screen ── */

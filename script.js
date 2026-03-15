@@ -25,7 +25,8 @@ const CONFIG = {
     // Stretch lerp for locked lines
     STRETCH_LERP: 0.008,         // very slow — ~2-3s settle, peripheral vision only
     // Viewport resize lerp (keyboard open/close)
-    VIEWPORT_LERP: 0.15,         // fast but smooth — ~300ms settle
+    VIEWPORT_LERP: 0.08,         // smooth with gentle bounce
+    VIEWPORT_BOUNCE: 0.12,       // overshoot amount (fraction of remaining distance)
     // Responsive zoom: reference viewport area (desktop ~1920x1080)
     ZOOM_REF_AREA: 1920 * 1080,
     // Line break mode: 'squeeze' (default), 'justified', or 'natural'
@@ -75,6 +76,10 @@ class WritingApp {
         // Smooth zoom lerp
         this.zoomTargetScale = 1;
         this.animationId = null;
+
+        // Reading mode (keyboard closed)
+        this.isReadingMode = false;
+        this.viewportVelocity = 0;
 
         this.init();
     }
@@ -158,22 +163,33 @@ class WritingApp {
             if (e.key === 'Enter') this.handleEnter(e);
         });
 
-        // Focus management — click/tap anywhere to refocus the textarea
-        this.viewport.addEventListener('click', () => this.focusInput());
+        // Tap to resume writing from reading mode, or refocus in writing mode
+        this.viewport.addEventListener('click', () => {
+            if (this.isReadingMode) {
+                this.enterWritingMode();
+            } else {
+                this.focusInput();
+            }
+        });
         this.viewport.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            this.focusInput();
+            if (!this.isReadingMode) {
+                e.preventDefault();
+                this.focusInput();
+            }
+            // In reading mode, let touch events through for native scrolling
         });
 
-        // Refocus on blur, but not if sessions screen or prompt overlay is showing
+        // On blur, check if keyboard was dismissed → enter reading mode
         this.hiddenInput.addEventListener('blur', () => {
             setTimeout(() => {
-                const sessionsOpen = !document.getElementById('sessions-screen').classList.contains('hidden');
                 const promptOpen = document.getElementById('prompt-overlay');
-                if (!sessionsOpen && !promptOpen) {
-                    this.focusInput();
+                if (promptOpen) return;
+                // If viewport height grew, keyboard was dismissed
+                const currentH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+                if (currentH > this.renderedViewportH + 50) {
+                    this.enterReadingMode();
                 }
-            }, 50);
+            }, 100);
         });
 
         // Resize
@@ -229,6 +245,24 @@ class WritingApp {
 
     focusInput() {
         this.hiddenInput.focus({ preventScroll: true });
+    }
+
+    enterReadingMode() {
+        this.isReadingMode = true;
+        this.cursorEl.style.display = 'none';
+        // Enable native scrolling
+        this.viewport.style.overflow = 'auto';
+        this.viewport.style.webkitOverflowScrolling = 'touch';
+    }
+
+    enterWritingMode() {
+        this.isReadingMode = false;
+        this.cursorEl.style.display = '';
+        // Disable native scrolling
+        this.viewport.style.overflow = 'hidden';
+        // Refocus textarea (user gesture context)
+        this.hiddenInput.focus({ preventScroll: true });
+        // Viewport will resize when keyboard opens — animation handles it
     }
 
     handleInput() {
@@ -498,14 +532,17 @@ class WritingApp {
             const zoomSettled = Math.abs(this.currentScale - this.zoomTargetScale) < CONFIG.ZOOM_MIN_DIFF;
             if (zoomSettled) this.currentScale = this.zoomTargetScale;
 
-            // Viewport height: lerp for smooth keyboard transitions
-            this.renderedViewportH += (this.viewportH - this.renderedViewportH) * CONFIG.VIEWPORT_LERP;
-            const viewportSettled = Math.abs(this.renderedViewportH - this.viewportH) < 1;
+            // Viewport height: spring lerp with gentle bounce
+            const viewportDiff = this.viewportH - this.renderedViewportH;
+            this.viewportVelocity += viewportDiff * CONFIG.VIEWPORT_LERP;
+            this.viewportVelocity *= (1 - CONFIG.VIEWPORT_BOUNCE);
+            this.renderedViewportH += this.viewportVelocity;
+            const viewportSettled = Math.abs(viewportDiff) < 1 && Math.abs(this.viewportVelocity) < 0.5;
             if (viewportSettled) {
                 this.renderedViewportH = this.viewportH;
-            } else {
-                this.viewport.style.height = this.renderedViewportH + 'px';
+                this.viewportVelocity = 0;
             }
+            this.viewport.style.height = this.renderedViewportH + 'px';
 
             const stretchSettled = this.applyStretch();
             this.updateTransform();
@@ -524,8 +561,8 @@ class WritingApp {
         const scale = this.currentScale;
         const targetWidth = (this.viewportW / scale) - 40;
         // Fast lerp during keyboard animation, slow lerp during normal writing
-        const viewportAnimating = Math.abs(this.renderedViewportH - this.viewportH) > 1;
-        const lerpFactor = viewportAnimating ? CONFIG.VIEWPORT_LERP : CONFIG.STRETCH_LERP;
+        const viewportAnimating = Math.abs(this.renderedViewportH - this.viewportH) > 1 || Math.abs(this.viewportVelocity) > 0.5;
+        const lerpFactor = viewportAnimating ? 0.15 : CONFIG.STRETCH_LERP;
         let allSettled = true;
 
         const children = this.textDisplay.children;
