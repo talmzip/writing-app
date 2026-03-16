@@ -1,5 +1,15 @@
 # Decisions
 
+## 2026-03-16 — Reverted to per-frame font-size lerp (no CSS scale for zoom)
+Decision: Revert compensatingScale/CSS-scale zoom. Use per-frame font-size lerp (currentScale lerps toward target, applyVisualFontSize each frame).
+Reason: CSS scale from transform-origin 0,0 caused visible position jumps — text and cursor shifted because scale didn't center on the focal point. Per-frame font-size change is cheap enough for the DOM complexity of this app.
+Impact: Zoom is smooth again. No CSS scale() in the transform — only translateY (and translateX for RTL).
+
+## 2026-03-16 — Incremental DOM rendering for locked lines
+Decision: Reuse existing DOM nodes for locked lines, only insert new ones. Active line always updates. Fall back to full innerHTML rebuild when locked lines are invalidated.
+Reason: Full innerHTML rebuild on every input caused unnecessary DOM thrashing. Most keystrokes only affect the active line or add one new locked line.
+Impact: Most input events now touch only 1-2 DOM nodes instead of rebuilding all of them.
+
 ## 2026-03-15 — ES module split planned, no bundler
 Decision: Split script.js into ~12 ES modules under `src/`. Use native ES module imports (`<script type="module">`), no bundler.
 Reason: Single 830-line file is approaching maintainability limits. New features (highlights, zen mode, type-to-navigate) will push it further. ES modules work natively in all target browsers.

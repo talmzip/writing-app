@@ -1,5 +1,23 @@
 # Dev Log
 
+## 2026-03-16 — Transition fixes, zoom fix, reading mode improvements
+- Reverted compensatingScale/CSS-scale zoom to proven per-frame font-size lerp — CSS scale from origin 0,0 caused position jumps
+- Phased writing→reading transition: viewport expands first (text stays in place), then text slides to reading position, then switch to native scroll
+- Improved reading→writing: converts scroll position to offset accurately, cursor appears with 250ms delay (keyboard settles first)
+- Made gesture recognizer touchstart passive — fixes scroll jank in reading mode
+- Added `user-select: none` on text-world — prevents text selection without needing preventDefault
+- Added top padding (5vh) in reading mode for breathing room
+- Added Transitions section to WritingAppDesign.md (user-facing descriptions)
+
+## 2026-03-16 — Module split + smoothness refactor (Phase 1+2)
+- Split monolithic `script.js` (988 lines) into 8 ES modules under `src/`
+- New AnimationLoop class: central rAF with named registered tick functions, auto-stops when all settled
+- New GestureRecognizer class: classifies touch/click, fires callbacks (no preventDefault — consumer decides)
+- New ModeManager state machine: prompt→writing↔reading, owns all DOM state per mode, wires gestures per mode
+- Incremental DOM rendering (Phase 2B): only inserts new locked line divs + updates active line — falls back to full rebuild on boundary invalidation
+- Unified animation loop (Phase 2C): zoom, stretch, scroll, viewport, fade all as registered tick functions
+- `index.html` now uses `<script type="module" src="src/main.js">`
+
 ## 2026-03-15 — Reading/writing mode transitions fixed, design doc + implementation plan
 
 - Fixed reading→writing mode re-entry bug (handleResize checked _readingModeBlocked after heightGrew — reordered)

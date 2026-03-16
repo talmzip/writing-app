@@ -114,21 +114,41 @@ Keep `index.html` pointing to `<script type="module" src="src/main.js">`. No bun
 Replace boolean flags with an explicit state machine:
 
 ```
-States: PROMPT → WRITING → READING → ZEN
-                    ↕          ↑
-                    └──────────┘
-                    ↕
-               SESSIONS_VIEW
+States: PROMPT, WRITING, READING, SESSIONS_VIEW, HIGHLIGHTS_VIEW, ZEN
+
+                      PROMPT
+                        ↓
+                     WRITING ←──────────────────┐
+                    ↕   ↕  ↕                    │
+              READING   │   └── SESSIONS_VIEW ──┘
+              ↕  ↕  ↕   │                      │
+              │  │  │    └── HIGHLIGHTS_VIEW ──┘
+              │  │  │
+              │  │  └── SESSIONS_VIEW ──→ WRITING
+              │  └── HIGHLIGHTS_VIEW ──→ WRITING
+              └── NEW_WRITE ──→ WRITING (fresh session)
+
+              WRITING ↔ ZEN (returns to WRITING)
+              READING ↔ ZEN (returns to READING)
 
 Transitions:
-  PROMPT → WRITING:    tap overlay
-  WRITING → READING:   keyboard close (viewport height grew)
-  READING → WRITING:   tap (quick, minimal movement)
-  WRITING → ZEN:       trigger from highlights viewer
-  ZEN → WRITING:       tap to exit
-  WRITING → SESSIONS:  type "past" / type "highlight"
-  SESSIONS → WRITING:  back button
+  PROMPT → WRITING:           tap overlay
+  WRITING → READING:          keyboard close
+  READING → WRITING:          tap
+  WRITING → SESSIONS_VIEW:    via type-to-navigate or gap menu
+  WRITING → HIGHLIGHTS_VIEW:  via type-to-navigate or gap menu
+  READING → SESSIONS_VIEW:    via gap menu
+  READING → HIGHLIGHTS_VIEW:  via gap menu
+  READING → NEW_WRITE:        via gap menu (starts fresh session)
+  SESSIONS_VIEW → WRITING:    back / dismiss
+  HIGHLIGHTS_VIEW → WRITING:  back / dismiss
+  WRITING → ZEN:              press/hold highlighted text → returns to WRITING
+  READING → ZEN:              press/hold highlighted text → returns to READING
 ```
+
+Zen mode remembers which mode it was entered from and returns there on exit.
+
+Specific gestures for each transition are intentionally left flexible — they will be designed per-transition and may change.
 
 Each state defines:
 - Which touch behavior is active (`touch-action` value)
@@ -140,16 +160,7 @@ Transitions are explicit functions with clear before/after. No property toggling
 
 ### Gesture recognizer
 
-One module that listens to `touchstart`, `touchmove`, `touchend`, and `click`. It classifies each gesture and emits intents:
-
-| Gesture | Reading mode | Writing mode | Gap area |
-|---------|-------------|-------------|----------|
-| Quick tap (< 300ms, < 15px) | Enter writing | Focus textarea | — |
-| Vertical scroll | Native scroll | Blocked | — |
-| Swipe up from gap | — | — | Start highlighting |
-| Long press | — | — | — (future) |
-
-The recognizer doesn't know about modes — it just reports what happened. The mode manager decides what to do with it.
+One module that listens to `touchstart`, `touchmove`, `touchend`, and `click`. It classifies each gesture and emits intents. The recognizer doesn't know about modes — it just reports what happened. The mode manager decides what to do with it.
 
 ---
 
@@ -294,6 +305,21 @@ Steps:
 6. Test: all transitions work, tap/scroll/swipe all correct
 
 **Risk:** Medium. This is where the previous bugs lived. Must test exhaustively on mobile (iOS Safari, Chrome Android, Samsung Internet).
+
+### ⛔ Quality Gate — Hard stop after Phase 2
+
+No Phase 3 work begins until reading↔writing transitions are solid. Checklist:
+
+- [ ] Writing→Reading transition is smooth (no visual snap, no flicker)
+- [ ] Reading→Writing transition is instant and reliable (tap always works)
+- [ ] Keyboard open/close animations don't trigger false mode switches
+- [ ] Overscroll at top/bottom of reading mode doesn't accidentally enter writing
+- [ ] Orientation change doesn't break mode state
+- [ ] Tested on real devices: iOS Safari, Chrome Android, Samsung Internet
+- [ ] Zoom animation feels natural during transitions
+- [ ] No regressions from Phase 1 behavior
+
+This is the layer every future feature sits on. Getting it right here is cheaper than debugging it through highlights, zen mode, and type-to-navigate.
 
 ### Phase 3: Highlights
 

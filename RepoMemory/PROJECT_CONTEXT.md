@@ -5,8 +5,8 @@ A minimalist, distraction-free writing app for Morning Pages / stream-of-conscio
 
 ## Current state
 - Writing experience: open, type, zoom-out effect as you write
-- Zoom: continuous — text rendered at actual visual font size (BASE_FONT_SIZE * scale), no CSS transform scale
-- Lines: each line is a locked DOM element — no reflow during zoom
+- Zoom: continuous font-size lerp — `currentScale` lerps toward target each animation frame, no CSS scale transform
+- Lines: each line is a locked DOM element — incremental DOM updates (only new lines inserted, active line updated)
 - Stretch: per-line `letter-spacing` keeps text filling the viewport at all scales
 - Squeeze mode (default): negative letter-spacing compresses active line when it exceeds cpl
 - Two additional line-break modes (dev toggle Ctrl+Shift+J): Justified and Natural
@@ -17,16 +17,28 @@ A minimalist, distraction-free writing app for Morning Pages / stream-of-conscio
 - RTL: auto-detected for Hebrew text
 - Prompt overlay: "what's on your mind?" — tap to start
 
+## Architecture
+ES modules under `src/`. Entry point: `src/main.js`.
+
+- `src/config.js` — CONFIG constants
+- `src/animation.js` — AnimationLoop (central rAF, registered tick functions)
+- `src/writing-engine.js` — WritingApp class (input, rendering, zoom, cursor, lines, sessions)
+- `src/gesture-recognizer.js` — GestureRecognizer (touch/click classification)
+- `src/mode-manager.js` — ModeManager (prompt/writing/reading state machine)
+- `src/session-storage.js` — SessionStorage (localStorage wrapper)
+- `src/sessions-ui.js` — sessionsUI (past sessions viewer)
+- `src/main.js` — wiring and boot
+
+Old `script.js` kept as reference (not loaded).
+
 ## Key files
-- `index.html` — markup shell
+- `index.html` — markup shell (`<script type="module" src="src/main.js">`)
 - `styles.css` — all styling
-- `script.js` — `WritingApp` class, `SessionStorage`, `sessionsUI`
 - `WritingAppDesign.md` — design vision
 
 ## Known issues / next steps
 - RTL with letter-spacing stretch untested
 - Sessions toggle button hidden (will be replaced by type-to-navigate)
-- Next: module split (Phase 1 of ImplementationPlan.md), then gesture recognizer + mode state machine (Phase 2)
 - Planned features: Highlights (gap-swipe), Type-to-Navigate, Zen Mode, gap ambient visuals
 - See `ImplementationPlan.md` for full 6-phase plan and architecture recommendations
 - See `WritingAppDesign.md` for design vision and feature specs

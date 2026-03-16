@@ -69,7 +69,32 @@ When the user folds the keyboard (or the textarea loses focus), the app enters *
 
 The visual transition must be smooth — text expanding from half-screen to full-screen. **The per-line stretch values and visual character of the text must be preserved.** Reading mode is not a reformat — it's the same beautiful text, just shown in a larger viewport.
 
-> **Current status:** Implemented. The rendering engine uses actual font-size rendering (not CSS scale). Reading mode switches to native browser scroll. Transition robustness on mobile is an ongoing area of polish — see Implementation Plan for architectural notes.
+> **Current status:** Implemented. Phased transitions with smooth viewport expansion and text settling.
+
+## Transitions
+
+### Writing to Reading
+
+When the keyboard folds, the gap below the cursor follows it down, staying visible at the bottom of the screen. The cursor fades away. The text stays in place — only the space below it grows as the keyboard disappears.
+
+Once the keyboard is gone and the screen is fully open, the text gently settles into its reading position. If there's enough text to fill the screen, it slides down to cover the space naturally. If not, it stays where it is with breathing room below.
+
+The feeling: the page exhales. The keyboard slides away like a drawer closing, and the text stretches into the newly opened space.
+
+### Reading to Writing
+
+Tap anywhere. The keyboard begins to rise from the bottom, and the text slides upward to make room. The gap rides on top of the keyboard, maintaining its presence. Once the keyboard is settled and the text has found its place, the cursor appears — blinking, ready.
+
+The feeling: the page inhales. It gathers itself, creates the intimate writing space, and waits.
+
+### Principles
+
+- Transitions are sequential, not simultaneous. Each step completes visually before the next begins.
+- The gap is always present — it moves and resizes, but never vanishes completely.
+- The cursor is the last thing to appear and the first thing to disappear.
+- Nothing snaps. Everything lerps, slides, or fades.
+
+### Status: Implemented
 
 ## Highlights
 
@@ -214,7 +239,7 @@ Every session starts blank. Always. The blank page is the ritual.
 
 - **Input:** Hidden `<textarea>` captures all input (mobile + desktop). `input` event for text, `keydown` for Enter.
 - **Rendering:** Text in `#text-display` as locked `<div class="line">` elements. Line breaking computed in JS. Font rendered at actual visual size (`BASE_FONT_SIZE * scale`).
-- **Zoom:** Continuous font-size interpolation with ease-out curve. Lerped each animation frame.
+- **Zoom:** Continuous font-size interpolation with ease-out curve. `currentScale` lerps toward `zoomTargetScale` each animation frame. No CSS scale transform — font-size is the only zoom mechanism.
 - **Stretch:** Per-line `letter-spacing` with slow lerp animation. Active line = 0 spacing. Locked lines stretch toward target computed from current scale each frame.
 - **Cursor:** Positioned via zero-width anchor `<span>`. Cursor div inside text-world.
 - **Scroll:** Writing mode uses `translateY` to keep cursor at target vertical position. Reading mode uses native browser scroll.
@@ -229,6 +254,7 @@ Every session starts blank. Always. The blank page is the ritual.
 
 ## Changelog
 
+- **2026-03-16** — Added: Transitions section (Writing↔Reading choreography, principles). Updated: Reading Mode status. Updated: Architecture (zoom mechanism). Status: Implemented.
 - **2026-03-15** — Added: Highlights (gap-swipe, visual treatment, persistence, un-highlight). Added: Zen Mode (letter animation, isolated view). Added: Type-to-Navigate (trigger words at session start). Added: Text Animation Philosophy ("text is alive"). Updated: Gap section (highlight swipe + ambient visuals coexist). Updated: Sessions viewer (highlights tab). Updated: Architecture (gesture recognizer, animation system, modules). Updated: Core Principles (text is alive, everything is satisfying). Updated: Technical Stack (ES modules). Updated: Reading Mode status (implemented, not broken).
 - **2026-03-14** — Added: Squeeze line-break mode (negative letter-spacing compression). Updated line locking details.
 - **2026-03-14** — Added: Line Locking & Stretch mechanism. Added: Two line-break modes.
